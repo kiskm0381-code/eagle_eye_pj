@@ -12,11 +12,19 @@ class AppColors {
   static const cardBackground = Color(0xFF1E1E1E);
   static const navBarBackground = Color(0xFF1E1E1E);
   static const primary = Colors.blueAccent;
-  static const sRankGradientStart = Color(0xFFff5f6d);
-  static const sRankGradientEnd = Color(0xFFffc371);
+  
+  // ランク別カラー
+  static const rankS_Start = Color(0xFFff9966);
+  static const rankS_End = Color(0xFFff5e62);
+  static const rankA_Start = Color(0xFFcb2d3e);
+  static const rankA_End = Color(0xFFef473a);
+  static const rankB_Start = Color(0xFF00c6ff);
+  static const rankB_End = Color(0xFF0072ff);
+  static const rankC_Start = Color(0xFF56ab2f);
+  static const rankC_End = Color(0xFFa8e063);
+  
   static const textPrimary = Colors.white;
   static const textSecondary = Colors.grey;
-  static const warning = Color(0xFFff4b4b);
 }
 
 // 職業データモデル
@@ -72,6 +80,8 @@ class JobSelectionPage extends StatelessWidget {
                 const Icon(Icons.remove_red_eye_rounded, size: 80, color: Colors.white),
                 const SizedBox(height: 24),
                 const Text("Eagle Eye", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                const Text("AIによる観光需要予測システム", style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
                 const SizedBox(height: 60),
                 ListView.separated(
                   shrinkWrap: true,
@@ -93,7 +103,7 @@ class JobSelectionPage extends StatelessWidget {
       color: AppColors.cardBackground,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => DashboardPage(selectedJob: job))),
+        onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainContainerPage(selectedJob: job))),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
@@ -102,6 +112,7 @@ class JobSelectionPage extends StatelessWidget {
               Icon(job.icon, color: job.badgeColor, size: 28),
               const SizedBox(width: 20),
               Expanded(child: Text(job.label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+              const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.textSecondary, size: 16),
             ],
           ),
         ),
@@ -111,19 +122,23 @@ class JobSelectionPage extends StatelessWidget {
 }
 
 // ==========================================
-// 📱 2. ダッシュボード画面
+// 📱 2. メイン画面 (BottomNav管理)
 // ==========================================
-class DashboardPage extends StatefulWidget {
+class MainContainerPage extends StatefulWidget {
   final JobData selectedJob;
-  const DashboardPage({super.key, required this.selectedJob});
+  const MainContainerPage({super.key, required this.selectedJob});
+
   @override
-  State<DashboardPage> createState() => _DashboardPageState();
+  State<MainContainerPage> createState() => _MainContainerPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
-  bool isLoading = true;
+class _MainContainerPageState extends State<MainContainerPage> {
+  int _currentIndex = 0;
   List<dynamic> allData = [];
+  bool isLoading = true;
   String errorMessage = "";
+  // PageControllerを使ってDashboardPageのページ切り替えを制御
+  final PageController _dashboardPageController = PageController();
 
   @override
   void initState() {
@@ -145,10 +160,23 @@ class _DashboardPageState extends State<DashboardPage> {
       }
     } catch (e) {
       setState(() {
-        errorMessage = "データ取得エラー: $e";
+        errorMessage = "データ取得エラー: ネット環境を確認してください";
         isLoading = false;
       });
     }
+  }
+
+  // カレンダーから日付を選んだ時の処理
+  void _onDateSelected(int index) {
+    setState(() {
+      _currentIndex = 0; // Homeタブに戻る
+    });
+    // 少し待ってからページ遷移（Homeタブの描画を待つ）
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_dashboardPageController.hasClients) {
+        _dashboardPageController.jumpToPage(index);
+      }
+    });
   }
 
   @override
@@ -156,30 +184,159 @@ class _DashboardPageState extends State<DashboardPage> {
     if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (errorMessage.isNotEmpty) return Scaffold(body: Center(child: Text(errorMessage, style: const TextStyle(color: Colors.red))));
 
+    // タブの中身
+    final List<Widget> pages = [
+      DashboardPage(selectedJob: widget.selectedJob, allData: allData, pageController: _dashboardPageController),
+      CalendarPage(allData: allData, onDateSelected: _onDateSelected),
+    ];
+
     return Scaffold(
-      body: PageView.builder(
-        itemCount: allData.length,
-        itemBuilder: (context, index) {
-          return DailyReportView(data: allData[index], selectedJob: widget.selectedJob, pageIndex: index);
-        },
-      ),
+      body: pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: AppColors.navBarBackground,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
+        currentIndex: _currentIndex,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Calendar'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
         onTap: (index) {
-          if (index == 2) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const JobSelectionPage()));
+          if (index == 2) {
+             Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const JobSelectionPage()));
+          } else {
+            setState(() {
+              _currentIndex = index;
+            });
+          }
         },
       ),
     );
   }
 }
 
+// ==========================================
+// 📱 3. ダッシュボード (横スワイプ)
+// ==========================================
+class DashboardPage extends StatelessWidget {
+  final JobData selectedJob;
+  final List<dynamic> allData;
+  final PageController pageController;
+
+  const DashboardPage({super.key, required this.selectedJob, required this.allData, required this.pageController});
+
+  @override
+  Widget build(BuildContext context) {
+    return PageView.builder(
+      controller: pageController,
+      itemCount: allData.length,
+      itemBuilder: (context, index) {
+        return DailyReportView(data: allData[index], selectedJob: selectedJob, pageIndex: index);
+      },
+    );
+  }
+}
+
+// ==========================================
+// 📱 4. カレンダー画面
+// ==========================================
+class CalendarPage extends StatelessWidget {
+  final List<dynamic> allData;
+  final Function(int) onDateSelected;
+
+  const CalendarPage({super.key, required this.allData, required this.onDateSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Forecast Calendar")),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("予測データ一覧", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textSecondary)),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.separated(
+                itemCount: allData.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final data = allData[index];
+                  final String date = data['date'] ?? "";
+                  final String rank = data['rank'] ?? "-";
+                  final String weather = data['weather_overview']['condition'] ?? "";
+                  
+                  // ランク色取得
+                  List<Color> colors = _getRankColors(rank);
+
+                  String dayLabel = "今日";
+                  if (index == 1) dayLabel = "明日";
+                  if (index == 2) dayLabel = "明後日";
+
+                  return InkWell(
+                    onTap: () => onDateSelected(index),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(colors: colors),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(rank, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("$dayLabel  $date", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                const SizedBox(height: 4),
+                                Text(weather, style: const TextStyle(color: Colors.grey)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ヘルパー関数: ランクごとの色を返す
+List<Color> _getRankColors(String rank) {
+  switch (rank) {
+    case 'S': return [AppColors.rankS_Start, AppColors.rankS_End];
+    case 'A': return [AppColors.rankA_Start, AppColors.rankA_End];
+    case 'B': return [AppColors.rankB_Start, AppColors.rankB_End];
+    case 'C': return [AppColors.rankC_Start, AppColors.rankC_End];
+    default: return [Colors.grey, Colors.grey];
+  }
+}
+
+// ==========================================
+// 📱 5. 日報ビュー (メイン表示)
+// ==========================================
 class DailyReportView extends StatelessWidget {
   final Map<String, dynamic> data;
   final JobData selectedJob;
@@ -190,17 +347,15 @@ class DailyReportView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     String date = data['date'] ?? "";
-    String rank = data['rank'] ?? "-";
-    // メイン天気情報
+    String rank = data['rank'] ?? "C";
     Map<String, dynamic> wOverview = data['weather_overview'] ?? {};
-    String condition = wOverview['condition'] ?? "不明";
+    String condition = wOverview['condition'] ?? "詳細不明";
     String high = wOverview['high'] ?? "--";
     String low = wOverview['low'] ?? "--";
     String rain = wOverview['rain'] ?? "--";
 
-    // タイムライン情報
-    Map<String, dynamic> timeline = data['timeline'] ?? {};
-
+    // ランクに応じた色とラベル
+    List<Color> rankColors = _getRankColors(rank);
     String rankLabel = "不明";
     if (rank == "S") rankLabel = "激混み";
     else if (rank == "A") rankLabel = "混雑";
@@ -210,7 +365,7 @@ class DailyReportView extends StatelessWidget {
     return SafeArea(
       child: Column(
         children: [
-          _buildHeader(date),
+          _buildHeader(date, pageIndex),
           Expanded(
             child: SingleChildScrollView(
               child: Padding(
@@ -218,15 +373,14 @@ class DailyReportView extends StatelessWidget {
                 child: Column(
                   children: [
                     const SizedBox(height: 20),
-                    // 天気詳細付きのランクカード
-                    _buildMainCard(rank, rankLabel, condition, high, low, rain),
+                    // ★文字切れ対応: FlexibleとSingleChildScrollViewは使わず、テキスト表示部分を工夫
+                    _buildMainCard(rank, rankLabel, condition, high, low, rain, rankColors),
                     const SizedBox(height: 30),
                     const Align(alignment: Alignment.centerLeft, child: Text("Time Schedule", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                     const SizedBox(height: 16),
-                    // タイムライン (朝・昼・夜)
-                    _buildTimeSlot(timeline['morning'], "朝 (05:00-11:00)", Icons.wb_twilight),
-                    _buildTimeSlot(timeline['daytime'], "昼 (11:00-16:00)", Icons.wb_sunny),
-                    _buildTimeSlot(timeline['night'], "夜 (16:00-24:00)", Icons.nights_stay),
+                    _buildTimeSlot(data['timeline']?['morning'], "朝 (05:00-11:00)", Icons.wb_twilight),
+                    _buildTimeSlot(data['timeline']?['daytime'], "昼 (11:00-16:00)", Icons.wb_sunny),
+                    _buildTimeSlot(data['timeline']?['night'], "夜 (16:00-24:00)", Icons.nights_stay),
                     const SizedBox(height: 40),
                   ],
                 ),
@@ -238,8 +392,11 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader(String date) {
-    String dayLabel = pageIndex == 0 ? "今日" : (pageIndex == 1 ? "明日" : "明後日");
+  Widget _buildHeader(String date, int index) {
+    String dayLabel = "今日";
+    if (index == 1) dayLabel = "明日";
+    if (index == 2) dayLabel = "明後日";
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
       child: Row(
@@ -263,29 +420,41 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
-  Widget _buildMainCard(String rank, String label, String cond, String high, String low, String rain) {
+  // ★修正: 色の変更 & 文字切れ対応
+  Widget _buildMainCard(String rank, String label, String cond, String high, String low, String rain, List<Color> colors) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(colors: [AppColors.sRankGradientStart, AppColors.sRankGradientEnd], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        boxShadow: [BoxShadow(color: colors[0].withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 6))],
       ),
       child: Column(
         children: [
           Text(rank, style: const TextStyle(fontSize: 80, fontWeight: FontWeight.bold, height: 1.0)),
           Text(label, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          // 天気詳細情報
+          // 天気詳細 (文字が長くても折り返すように修正)
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: Colors.black.withOpacity(0.2), borderRadius: BorderRadius.circular(16)),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            child: Column(
               children: [
-                Column(children: [const Icon(Icons.wb_sunny_outlined, color: Colors.white70), const SizedBox(height: 4), Text(cond, style: const TextStyle(fontSize: 12))]),
-                Column(children: [const Icon(Icons.thermostat, color: Colors.white70), const SizedBox(height: 4), Text("$high / $low", style: const TextStyle(fontSize: 12))]),
-                Column(children: [const Icon(Icons.umbrella, color: Colors.white70), const SizedBox(height: 4), Text(rain, style: const TextStyle(fontSize: 12))]),
+                 Text(cond, 
+                   style: const TextStyle(fontSize: 13, height: 1.4), 
+                   textAlign: TextAlign.center,
+                   softWrap: true, // 折り返し有効
+                 ),
+                 const SizedBox(height: 12),
+                 Row(
+                   mainAxisAlignment: MainAxisAlignment.spaceAround,
+                   children: [
+                     Column(children: [const Icon(Icons.thermostat, color: Colors.white70, size: 20), const SizedBox(height: 4), Text("最高 $high\n最低 $low", textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))]),
+                     Column(children: [const Icon(Icons.umbrella, color: Colors.white70, size: 20), const SizedBox(height: 4), Text(rain, style: const TextStyle(fontSize: 12))]),
+                   ],
+                 )
               ],
             ),
           )
@@ -297,11 +466,12 @@ class DailyReportView extends StatelessWidget {
   Widget _buildTimeSlot(Map<String, dynamic>? data, String title, IconData icon) {
     if (data == null) return const SizedBox.shrink();
     
-    String temp = data['temp'] ?? "-";
+    // 気温情報の取得 (Python更新後は high/low が入る)
+    String high = data['high'] ?? "-";
+    String low = data['low'] ?? "-";
     String rain = data['rain'] ?? "-";
     String weather = data['weather'] ?? "-";
     
-    // 職業別アドバイスを取得
     Map<String, dynamic> advices = data['advice'] ?? {};
     String jobAdvice = advices[selectedJob.id] ?? "特になし";
 
@@ -318,17 +488,27 @@ class DailyReportView extends StatelessWidget {
               const SizedBox(width: 10),
               Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const Spacer(),
-              const Icon(Icons.thermostat, size: 14, color: Colors.grey),
-              Text(temp, style: const TextStyle(color: Colors.grey)),
-              const SizedBox(width: 8),
-              const Icon(Icons.umbrella, size: 14, color: Colors.grey),
-              Text(rain, style: const TextStyle(color: Colors.grey)),
+              // ★気温表記を分かりやすく
+              const Icon(Icons.thermostat, size: 14, color: Colors.redAccent),
+              Text(high, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              const SizedBox(width: 4),
+              const Icon(Icons.thermostat, size: 14, color: Colors.blueAccent),
+              Text(low, style: const TextStyle(color: Colors.grey, fontSize: 12)),
             ],
           ),
-          const Divider(color: Colors.grey),
-          Text("天気: $weather", style: const TextStyle(fontSize: 13, color: Colors.grey)),
-          const SizedBox(height: 8),
-          Text(jobAdvice, style: const TextStyle(fontSize: 14, height: 1.5)),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const SizedBox(width: 34), // インデント
+              Text("天気: $weather", style: const TextStyle(fontSize: 13, color: Colors.grey)),
+              const Spacer(),
+              const Icon(Icons.umbrella, size: 14, color: Colors.grey),
+              Text(" $rain", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            ],
+          ),
+          const Divider(color: Colors.grey, height: 24),
+          // ★文字切れ対策: SelectableTextでコピー可能＆折り返し
+          SelectableText(jobAdvice, style: const TextStyle(fontSize: 14, height: 1.6)),
         ],
       ),
     );
