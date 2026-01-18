@@ -10,8 +10,7 @@ void main() {
 class AppColors {
   static const background = Color(0xFF121212);
   static const cardBackground = Color(0xFF1E1E1E);
-  // ★前回のエラー修正：ここに追加しました！
-  static const navBarBackground = Color(0xFF1E1E1E);
+  static const navBarBackground = Color(0xFF1E1E1E); // 修正済み
   
   static const primary = Colors.blueAccent;
   static const sRankGradientStart = Color(0xFFff5f6d);
@@ -27,14 +26,12 @@ class JobData {
   final String label;
   final IconData icon;
   final Color badgeColor;
-  String advice; // データを後から入れるので varではなくString
-
+  
   JobData({
     required this.id,
     required this.label,
     required this.icon,
     required this.badgeColor,
-    this.advice = "データを取得中...",
   });
 }
 
@@ -62,7 +59,6 @@ class EagleEyeApp extends StatelessWidget {
 class JobSelectionPage extends StatelessWidget {
   const JobSelectionPage({super.key});
 
-  // 職業リストの定義（初期状態）
   static final List<JobData> initialJobList = [
     JobData(id: "taxi", label: "タクシー運転手", icon: Icons.local_taxi_rounded, badgeColor: const Color(0xFFFBC02D)),
     JobData(id: "restaurant", label: "飲食店", icon: Icons.restaurant_rounded, badgeColor: const Color(0xFFD32F2F)),
@@ -117,7 +113,6 @@ class JobSelectionPage extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: () {
-          // ダッシュボードへ移動時にデータを渡す
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => DashboardPage(selectedJob: job)));
         },
         borderRadius: BorderRadius.circular(16),
@@ -146,7 +141,7 @@ class JobSelectionPage extends StatelessWidget {
 }
 
 // ==========================================
-// 📱 2. ダッシュボード画面 (通信機能付き)
+// 📱 2. ダッシュボード画面 (横スワイプ対応)
 // ==========================================
 class DashboardPage extends StatefulWidget {
   final JobData selectedJob;
@@ -157,55 +152,30 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  // データの入れ物（初期値はロード中）
   bool isLoading = true;
-  String dateDisplay = "---";
-  String rank = "-";
-  String rankLabel = "読込中";
-  String weather = "-";
-  int score = 0;
-  List<Map<String, dynamic>> timelineData = [];
+  List<dynamic> allData = []; // 3日分のデータを全部入れる
+  String errorMessage = "";
 
   @override
   void initState() {
     super.initState();
-    _fetchData(); // 画面が開いたらすぐにデータを読みに行く
+    _fetchData();
   }
 
-  // ★GitHubからデータを取ってくる関数
+  // ★新しいURLからデータを取得
   Future<void> _fetchData() async {
-    const url = "https://raw.githubusercontent.com/kiskm0381-code/eagle_eye_pj/main/eagle_eye_data.json";
+    // 組織化後の新URL
+    const url = "https://raw.githubusercontent.com/eagle-eye-official/eagle_eye_pj/main/eagle_eye_data.json";
     
     try {
       final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final List<dynamic> data = jsonDecode(response.body);
         
-        // データを画面の変数にセット
         setState(() {
-          dateDisplay = data['date'] ?? "日付不明";
-          rank = data['rank'] ?? "-";
-          rankLabel = _getRankLabel(rank);
-          weather = data['weather']['condition'] ?? "不明";
-          
-          // 職業別のアドバイスを更新
-          String jobKey = widget.selectedJob.id;
-          if (data['advice'] != null && data['advice'][jobKey] != null) {
-            widget.selectedJob.advice = data['advice'][jobKey];
-          }
-
-          // タイムラインのデータを整形
-          timelineData = [];
-          final timeline = data['timeline'];
-          if (timeline != null) {
-            // 順番通りにリストに追加
-             _addTimelineItem(timeline['morning'], "朝 (Morning)", Icons.wb_twilight);
-             _addTimelineItem(timeline['daytime'], "日中 (Daytime)", Icons.wb_sunny);
-             _addTimelineItem(timeline['evening'], "夕方 (Evening)", Icons.nights_stay);
-             _addTimelineItem(timeline['night'], "夜 (Night)", Icons.bedtime);
-          }
-          isLoading = false; // ロード完了
+          allData = data;
+          isLoading = false;
         });
       } else {
         throw Exception('Failed to load data');
@@ -213,68 +183,36 @@ class _DashboardPageState extends State<DashboardPage> {
     } catch (e) {
       print("Error: $e");
       setState(() {
-        widget.selectedJob.advice = "データの取得に失敗しました。ネット環境を確認してください。";
+        errorMessage = "データの取得に失敗しました。\nネット環境を確認してください。";
         isLoading = false;
       });
     }
   }
 
-  void _addTimelineItem(dynamic periodData, String title, IconData icon) {
-    if (periodData != null) {
-      timelineData.add({
-        "time": periodData['time'],
-        "title": title,
-        "detail": periodData['events'],
-        "warning": periodData['warnings'], // 警告があれば入れる
-        "icon": icon,
-        "color": Colors.blue,
-      });
-    }
-  }
-
-  String _getRankLabel(String rank) {
-    switch (rank) {
-      case "S": return "激混み";
-      case "A": return "混雑";
-      case "B": return "普通";
-      case "C": return "閑散";
-      default: return "-";
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    
+    if (errorMessage.isNotEmpty) {
+      return Scaffold(
+        body: Center(child: Text(errorMessage, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center)),
+      );
+    }
+
+    // 3日分のデータをPageViewで横スライド表示
     return Scaffold(
-      body: isLoading 
-          ? const Center(child: CircularProgressIndicator()) // ロード中はグルグルを表示
-          : SafeArea(
-              child: Column(
-                children: [
-                  _buildHeader(),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 20),
-                            _buildSRankCard(),
-                            const SizedBox(height: 24),
-                            _buildAIAdviceCard(),
-                            const SizedBox(height: 30),
-                            const Text("Today's Flow", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                            const SizedBox(height: 16),
-                            _buildTimeline(),
-                            const SizedBox(height: 40),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      body: PageView.builder(
+        itemCount: allData.length,
+        itemBuilder: (context, index) {
+          return DailyReportView(
+            data: allData[index],
+            selectedJob: widget.selectedJob,
+            pageIndex: index, // 何ページ目か
+          );
+        },
+      ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: AppColors.navBarBackground,
         selectedItemColor: AppColors.primary,
@@ -286,15 +224,90 @@ class _DashboardPageState extends State<DashboardPage> {
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
         onTap: (index) {
-          if (index == 2) { // プロフィールタップで戻る
+          if (index == 2) {
              Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const JobSelectionPage()));
           }
         },
       ),
     );
   }
+}
 
-  Widget _buildHeader() {
+// 1日分のレポートを表示するWidget
+class DailyReportView extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final JobData selectedJob;
+  final int pageIndex;
+
+  const DailyReportView({
+    super.key,
+    required this.data,
+    required this.selectedJob,
+    required this.pageIndex,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // データ解析（JSONのキー揺らぎに対応）
+    String date = data['date'] ?? "日付不明";
+    String rank = data['rank'] ?? data['demand_rank'] ?? data['overall_rank'] ?? "-";
+    
+    // 天気情報の取得（文字列かオブジェクトか判定）
+    String weather = "不明";
+    if (data['weather'] is String) {
+      weather = data['weather'];
+    } else if (data['weather'] is Map) {
+      weather = data['weather']['condition'] ?? "詳細不明";
+    }
+
+    // ランクに応じたラベル
+    String rankLabel = "不明";
+    if (rank == "S") rankLabel = "激混み";
+    else if (rank == "A") rankLabel = "混雑";
+    else if (rank == "B") rankLabel = "普通";
+    else if (rank == "C") rankLabel = "閑散";
+
+    // 職業アドバイス
+    String advice = "アドバイスなし";
+    if (data['advice'] != null && data['advice'][selectedJob.id] != null) {
+      advice = data['advice'][selectedJob.id];
+    } else if (data['advice_by_profession'] != null && data['advice_by_profession'][selectedJob.id] != null) {
+      advice = data['advice_by_profession'][selectedJob.id];
+    }
+
+    return SafeArea(
+      child: Column(
+        children: [
+          _buildHeader(date),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 20),
+                    _buildSRankCard(rank, rankLabel, weather),
+                    const SizedBox(height: 24),
+                    _buildAIAdviceCard(advice),
+                    const SizedBox(height: 30),
+                    // ※タイムラインは構造が複雑なので今回は省略し、アドバイス重視にします
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(String date) {
+    String dayLabel = "今日";
+    if (pageIndex == 1) dayLabel = "明日";
+    if (pageIndex == 2) dayLabel = "明後日";
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
       child: Row(
@@ -303,32 +316,32 @@ class _DashboardPageState extends State<DashboardPage> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text("Eagle Eye", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              Text("Eagle Eye ($dayLabel)", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: widget.selectedJob.badgeColor.withOpacity(0.2),
+                  color: selectedJob.badgeColor.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: widget.selectedJob.badgeColor.withOpacity(0.5)),
+                  border: Border.all(color: selectedJob.badgeColor.withOpacity(0.5)),
                 ),
                 child: Row(
                   children: [
-                    Icon(widget.selectedJob.icon, color: widget.selectedJob.badgeColor, size: 14),
+                    Icon(selectedJob.icon, color: selectedJob.badgeColor, size: 14),
                     const SizedBox(width: 6),
-                    Text(widget.selectedJob.label, style: TextStyle(fontSize: 12, color: widget.selectedJob.badgeColor, fontWeight: FontWeight.bold)),
+                    Text(selectedJob.label, style: TextStyle(fontSize: 12, color: selectedJob.badgeColor, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
             ],
           ),
-          Text(dateDisplay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          Text(date, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
         ],
       ),
     );
   }
 
-  Widget _buildSRankCard() {
+  Widget _buildSRankCard(String rank, String label, String weather) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 36.0),
@@ -341,15 +354,18 @@ class _DashboardPageState extends State<DashboardPage> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(rank, style: const TextStyle(fontSize: 80, fontWeight: FontWeight.bold, color: Colors.white, height: 1.0)),
-          Text(rankLabel, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(label, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 8),
-          Text("天気: $weather", style: const TextStyle(fontSize: 14, color: Colors.white70)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(weather, style: const TextStyle(fontSize: 14, color: Colors.white70), textAlign: TextAlign.center),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAIAdviceCard() {
+  Widget _buildAIAdviceCard(String advice) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24.0),
@@ -362,53 +378,9 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           const Text("AI Advice", style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
           const SizedBox(height: 8),
-          Text(widget.selectedJob.advice, style: const TextStyle(fontSize: 15, height: 1.6, color: AppColors.textPrimary)),
+          Text(advice, style: const TextStyle(fontSize: 15, height: 1.6, color: AppColors.textPrimary)),
         ],
       ),
-    );
-  }
-
-  Widget _buildTimeline() {
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: timelineData.length,
-      itemBuilder: (context, index) {
-        final data = timelineData[index];
-        final isLast = index == timelineData.length - 1;
-        return IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(width: 60, child: Text(data['time'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
-              Column(
-                children: [
-                  Icon(data['icon'], size: 16, color: Colors.blue),
-                  if (!isLast) Expanded(child: Container(width: 2, color: AppColors.cardBackground)),
-                ],
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(data['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textPrimary)),
-                      const SizedBox(height: 4),
-                      Text(data['detail'], style: const TextStyle(color: AppColors.textSecondary)),
-                      if (data['warning'] != null && data['warning'] != "") ...[
-                        const SizedBox(height: 8),
-                        Text("⚠️ ${data['warning']}", style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold)),
-                      ]
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }
