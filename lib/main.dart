@@ -13,6 +13,7 @@ class AppColors {
   static const navBarBackground = Color(0xFF1E1E1E);
   static const primary = Colors.blueAccent;
   
+  // ランク別カラー
   static const rankS_Start = Color(0xFFff9966);
   static const rankS_End = Color(0xFFff5e62);
   static const rankA_Start = Color(0xFFcb2d3e);
@@ -24,8 +25,12 @@ class AppColors {
   
   static const textPrimary = Colors.white;
   static const textSecondary = Colors.grey;
+  
+  // ★復活させた警告色 (これがないとエラーになります！)
+  static const warning = Color(0xFFff4b4b);
 }
 
+// 職業データモデル
 class JobData {
   final String id;
   final String label;
@@ -182,13 +187,12 @@ class _MainContainerPageState extends State<MainContainerPage> {
     ];
 
     return Scaffold(
-      // ★Headerを共通化してここに配置
       appBar: AppBar(
-        toolbarHeight: 0, // デフォルトAppBarは隠す
+        toolbarHeight: 0, 
       ),
       body: Column(
         children: [
-          // ★カスタマイズヘッダー
+          // カスタマイズヘッダー
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: const BoxDecoration(
@@ -398,7 +402,7 @@ class DailyReportView extends StatelessWidget {
                     _buildMainCard(rank, rankLabel, condition, high, low, rain, rankColors),
                     const SizedBox(height: 24),
                     
-                    // ★イベント・交通情報カード
+                    // イベント・交通情報カード
                     _buildEventCard(eventName, eventTime, trafficWarn),
                     
                     const SizedBox(height: 30),
@@ -455,7 +459,6 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
-  // ★イベント用カードWidget
   Widget _buildEventCard(String name, String time, String warning) {
     if (name == "特になし" && warning == "") return const SizedBox.shrink();
 
@@ -487,6 +490,7 @@ class DailyReportView extends StatelessWidget {
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
+              // ★ここがエラー原因でした。warningをAppColorsに追加したので直ります！
               decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: [
