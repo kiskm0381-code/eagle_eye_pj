@@ -21,26 +21,28 @@ def get_ai_advice():
     try:
         genai.configure(api_key=API_KEY)
         
-        # --- 🛠 モデル自動検出ロジック (Colab成功版) ---
-        model_name = ""
-        print("🔍 利用可能なモデルを検索中...")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if "gemini" in m.name:
-                    model_name = m.name
-                    # flashがあれば即決、なければリストの後ろの方(proなど)を使う
-                    if "flash" in m.name:
-                        break
+        # --- 🛠 モデル選択ロジック (2026年最新版) ---
+        # まずは明示的に最新を指定してみる
+        target_model = "models/gemini-2.5-flash"
         
-        if not model_name:
-            # 万が一見つからない場合の保険
-            model_name = "models/gemini-1.5-flash"
-            print(f"⚠️ 自動検索失敗。デフォルト値を使用: {model_name}")
-        else:
-            print(f"✅ モデル決定: {model_name}")
+        print(f"🔍 モデル設定: {target_model} を試行します...")
+        
+        try:
+            model = genai.GenerativeModel(target_model)
+        except:
+            # ダメなら自動検索に切り替え
+            print("⚠️ 指定モデルが見つかりません。自動検索します...")
+            target_model = 'gemini-1.5-flash' # 仮の初期値
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    if 'gemini' in m.name:
+                        target_model = m.name
+                        if '2.5' in m.name or '2.0' in m.name: # 新しいバージョン優先
+                            break
+            print(f"✅ 自動選択されたモデル: {target_model}")
+            model = genai.GenerativeModel(target_model)
+        
         # ---------------------------------------------
-        
-        model = genai.GenerativeModel(model_name)
         
         # プロンプト（命令書）
         prompt = f"""
@@ -67,7 +69,7 @@ def get_ai_advice():
         return json.loads(text)
 
     except Exception as e:
-        print(f"エラー発生: {e}")
+        print(f"❌ エラー発生詳細: {e}")
         return None
 
 # --- メイン処理 ---
@@ -78,10 +80,9 @@ if __name__ == "__main__":
     
     if data:
         data["date"] = full_date
-        # JSONファイルとして保存
         with open("eagle_eye_data.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         print("✅ データ保存完了: eagle_eye_data.json")
     else:
         print("❌ データ生成失敗")
-        exit(1) # エラーとして終了させる
+        exit(1)
