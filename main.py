@@ -4,6 +4,7 @@ import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
+from google.api_core import exceptions
 
 # --- 設定 ---
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -67,40 +68,52 @@ def get_weather_label(code):
     return "曇り"
 
 def get_model():
-    """利用可能なモデルを自動検索して返す"""
+    """利用可能なモデルの中からFlashを優先的に探して返す"""
     genai.configure(api_key=API_KEY)
     print("🔍 利用可能なモデルを検索中...")
     
     target_model_name = None
+    flash_models = []
     
-    # 利用可能なモデル一覧を取得
     try:
+        # 全モデルをリストアップしてログに出す（デバッグ用）
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                # 1.5 Flash を最優先で探す
-                if 'gemini-1.5-flash' in m.name:
+                print(f"  - 発見: {m.name}")
+                if 'flash' in m.name.lower():
+                    flash_models.append(m.name)
+        
+        # Flashが含まれるモデルがあれば、その最初のやつを使う
+        if flash_models:
+            target_model_name = flash_models[0]
+        else:
+            # なければPro系を探す
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods and 'pro' in m.name.lower():
                     target_model_name = m.name
                     break
         
-        # Flashがなければ Pro を探す
-        if not target_model_name:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    if 'gemini-pro' in m.name:
-                        target_model_name = m.name
-                        break
-        
-        # それでもなければ指定なし（ライブラリのデフォルトに任せるが、通常はここで決まる）
+        # それでもなければデフォルト
         if not target_model_name:
              target_model_name = "models/gemini-pro"
 
-        print(f"✅ モデル決定: {target_model_name}")
+        print(f"✅ 決定したモデル: {target_model_name}")
         return genai.GenerativeModel(target_model_name)
 
     except Exception as e:
         print(f"⚠️ モデル検索エラー: {e}")
-        # 最終手段として文字列指定
         return genai.GenerativeModel("models/gemini-pro")
+
+def generate_with_retry(model, prompt):
+    """エラーが出たら一度だけ再挑戦する"""
+    try:
+        return model.generate_content(prompt)
+    except exceptions.ResourceExhausted:
+        print("⚠️ API制限(429)発生。30秒待機してリトライします...")
+        time.sleep(30)
+        return model.generate_content(prompt)
+    except Exception as e:
+        raise e
 
 def get_ai_advice(target_date, days_offset):
     if not API_KEY: return None
@@ -179,7 +192,9 @@ def get_ai_advice(target_date, days_offset):
         }}
         """
         
-        response = model.generate_content(prompt)
+        # リトライ機能付きで生成を実行
+        response = generate_with_retry(model, prompt)
+        
         text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(text)
 
@@ -196,8 +211,8 @@ if __name__ == "__main__":
         data = get_ai_advice(target_date, i)
         if data: all_data.append(data)
         
-        print("⏳ API制限回避のため10秒待機...")
-        time.sleep(10)
+        print("⏳ API制限回避のため20秒待機...")
+        time.sleep(20)
 
     if len(all_data) > 0:
         with open("eagle_eye_data.json", "w", encoding="utf-8") as f:
