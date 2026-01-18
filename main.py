@@ -68,13 +68,8 @@ def get_weather_label(code):
 
 def get_model():
     genai.configure(api_key=API_KEY)
-    # 最新モデルを優先的に使用
-    target_model = "models/gemini-2.0-flash-exp" # 最新があれば指定、なければ自動検索
-    try:
-        genai.GenerativeModel(target_model)
-        return genai.GenerativeModel(target_model)
-    except:
-        return genai.GenerativeModel("gemini-1.5-flash")
+    # ★修正: エラー回避のため、安定版の1.5-flashを固定で使用
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 def get_ai_advice(target_date, days_offset):
     if not API_KEY: return None
@@ -103,7 +98,7 @@ def get_ai_advice(target_date, days_offset):
         timing_text = "今日" if days_offset == 0 else f"{days_offset}日後の未来"
         print(f"🤖 {timing_text} ({full_date}) の予測生成中...")
 
-        # ★イベント情報を抽出するようにプロンプトを強化
+        # イベント情報を抽出するプロンプト
         prompt = f"""
         あなたは函館の観光コンサルタントAIです。
         {timing_text}である「{full_date}」の函館の観光需要予測データを作成してください。
@@ -112,7 +107,7 @@ def get_ai_advice(target_date, days_offset):
         {w_info}
         
         以下のJSON形式で出力してください（Markdown記号なし）。
-        特に「events」フィールドには、この時期の函館で開催される可能性が高いイベントや、天候による交通規制の可能性（「雪のため速度規制の恐れ」など）を具体的に予測して記述してください。
+        特に「events_info」には、この時期の函館で開催される可能性が高いイベントや、天候による交通規制の可能性（「雪のため速度規制の恐れ」など）を具体的に予測して記述してください。
 
         {{
             "date": "{full_date}",
@@ -170,7 +165,10 @@ if __name__ == "__main__":
         target_date = today + timedelta(days=i)
         data = get_ai_advice(target_date, i)
         if data: all_data.append(data)
-        time.sleep(2)
+        
+        # ★修正: 制限回避のため待機時間を10秒に延長
+        print("⏳ API制限回避のため10秒待機...")
+        time.sleep(10)
 
     if len(all_data) > 0:
         with open("eagle_eye_data.json", "w", encoding="utf-8") as f:
