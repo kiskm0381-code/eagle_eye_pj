@@ -1,23 +1,6 @@
 {
   "hakodate": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -1517,6 +1500,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
@@ -1533,23 +1533,6 @@
   ],
   "osaka_hokusetsu": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -3049,6 +3032,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
@@ -3065,23 +3065,6 @@
   ],
   "osaka_kita": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -4581,6 +4564,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
@@ -4597,23 +4597,6 @@
   ],
   "osaka_minami": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -6113,6 +6096,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
@@ -6129,23 +6129,6 @@
   ],
   "osaka_bay": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -7645,6 +7628,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
@@ -7661,23 +7661,6 @@
   ],
   "osaka_tennoji": [
     {
-      "date": "2026年01月19日 (月)",
-      "is_long_term": true,
-      "rank": "C",
-      "weather_overview": {
-        "condition": "予報待ち",
-        "high": "-",
-        "low": "-",
-        "rain": "-"
-      },
-      "events_info": {
-        "event_name": "ー",
-        "time_info": "",
-        "traffic_warning": ""
-      },
-      "timeline": null
-    },
-    {
       "date": "2026年01月20日 (火)",
       "is_long_term": true,
       "rank": "C",
@@ -9177,6 +9160,23 @@
       "date": "2026年04月18日 (土)",
       "is_long_term": true,
       "rank": "A",
+      "weather_overview": {
+        "condition": "予報待ち",
+        "high": "-",
+        "low": "-",
+        "rain": "-"
+      },
+      "events_info": {
+        "event_name": "ー",
+        "time_info": "",
+        "traffic_warning": ""
+      },
+      "timeline": null
+    },
+    {
+      "date": "2026年04月19日 (日)",
+      "is_long_term": true,
+      "rank": "B",
       "weather_overview": {
         "condition": "予報待ち",
         "high": "-",
