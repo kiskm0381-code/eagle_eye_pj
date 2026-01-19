@@ -311,14 +311,14 @@ class _MainContainerPageState extends State<MainContainerPage> {
     }
   }
 
-  // 設定更新（ProfileやHeaderから呼ばれる）
+  // 設定更新
   Future<void> _updateSettings({AreaData? area, JobData? job, String? age}) async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       if (area != null) {
         currentArea = area;
         prefs.setString('selected_area_id', area.id);
-        _dashboardPageController.jumpToPage(0); // エリア変更時はページリセット
+        _dashboardPageController.jumpToPage(0);
       }
       if (job != null) {
         currentJob = job;
@@ -381,7 +381,6 @@ class _MainContainerPageState extends State<MainContainerPage> {
     setState(() { _currentIndex = 0; });
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_dashboardPageController.hasClients) {
-        // ★修正: Homeは3日分しかないので、それ以上のインデックスなら警告を出す
         if (index < 3) {
           _dashboardPageController.jumpToPage(index);
         } else {
@@ -396,12 +395,10 @@ class _MainContainerPageState extends State<MainContainerPage> {
     if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (errorMessage.isNotEmpty) return Scaffold(body: Center(child: Text(errorMessage, style: const TextStyle(color: Colors.red))));
 
-    // データ抽出
     List<dynamic> currentAreaDataList = [];
     if (masterData.containsKey(currentArea.id)) {
       currentAreaDataList = masterData[currentArea.id];
     } else if (masterData is List) {
-      // 古い形式へのフォールバック
       currentAreaDataList = masterData as List<dynamic>; 
     }
 
@@ -412,9 +409,6 @@ class _MainContainerPageState extends State<MainContainerPage> {
         );
     }
 
-    // ★修正: 以前は「AI詳細データ」がないと空リストになっていたが、
-    // ここで「簡易データ」でも表示できるように、強制的に最初の3件を取得する
-    // (詳細データがある場合はそれが優先されるようなデータ構造ならベストだが、現状は先頭3件を表示)
     final dashboardList = currentAreaDataList.take(3).toList();
 
     final List<Widget> pages = [
@@ -427,14 +421,12 @@ class _MainContainerPageState extends State<MainContainerPage> {
       appBar: AppBar(toolbarHeight: 0),
       body: Column(
         children: [
-          // ★ヘッダー（左右独立タップ修正版）
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: const BoxDecoration(color: AppColors.background, border: Border(bottom: BorderSide(color: Colors.white10))),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // 左: エリア選択
                 InkWell(
                   onTap: _showAreaSelector,
                   borderRadius: BorderRadius.circular(8),
@@ -450,7 +442,6 @@ class _MainContainerPageState extends State<MainContainerPage> {
                     ),
                   ),
                 ),
-                // 右: 職業選択
                 InkWell(
                   onTap: _showJobSelector,
                   borderRadius: BorderRadius.circular(20),
@@ -493,7 +484,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
 }
 
 // ------------------------------
-// 👤 プロフィール画面 (新規作成)
+// 👤 プロフィール画面
 // ------------------------------
 class ProfilePage extends StatelessWidget {
   final AreaData area;
@@ -512,21 +503,14 @@ class ProfilePage extends StatelessWidget {
         children: [
           const Text("Profile Settings", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
           const SizedBox(height: 30),
-          _buildSettingItem(context, "登録エリア", area.name, () {
-             // 簡易実装: MainContainerのメソッドを呼び出せないので、ここでは表示のみとし、
-             // 本当はコールバックで親のモーダルを出すのがベストだが、
-             // 今回は「初期設定に戻る」ボタンで対応するか、ここでもダイアログを出す実装にする
-             // ここではシンプルにリセットボタンを下に配置
-          }),
+          _buildSettingItem(context, "登録エリア", area.name, () {}),
           const Divider(color: Colors.grey),
           _buildSettingItem(context, "職業", job.label, () {}),
           const Divider(color: Colors.grey),
           _buildSettingItem(context, "年代", age, () {
-             // 年代変更ダイアログ
              showModalBottomSheet(context: context, builder: (c) => _buildAgeSelector(c));
           }),
           const Divider(color: Colors.grey),
-          
           const Spacer(),
           SizedBox(
             width: double.infinity,
@@ -568,30 +552,197 @@ class ProfilePage extends StatelessWidget {
   }
 
   Widget _buildSettingItem(BuildContext context, String label, String value, VoidCallback onTap) {
-    // 編集機能はタップアクションで実装可能だが、今回は表示メインで実装
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(label, style: const TextStyle(color: Colors.grey, fontSize: 14)),
       subtitle: Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
       trailing: const Icon(Icons.edit, color: AppColors.primary, size: 20),
-      onTap: onTap, // タップで編集（今回は年代のみ実装例として入れた）
+      onTap: onTap,
     );
   }
 }
 
 // ------------------------------
-// 📊 ダッシュボード (修正版: 簡易データでも表示可能に)
+// 📅 カレンダーページ
+// ------------------------------
+class CalendarPage extends StatefulWidget {
+  final List<dynamic> allData;
+  final Function(int) onDateSelected;
+  const CalendarPage({super.key, required this.allData, required this.onDateSelected});
+  @override
+  State<CalendarPage> createState() => _CalendarPageState();
+}
+
+class _CalendarPageState extends State<CalendarPage> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+  Map<DateTime, String> _rankMap = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _parseData();
+  }
+  
+  @override
+  void didUpdateWidget(covariant CalendarPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.allData != oldWidget.allData) {
+      _parseData();
+    }
+  }
+
+  void _parseData() {
+    _rankMap = {};
+    for (var item in widget.allData) {
+      try {
+        String dateStr = item['date'].split(' ')[0];
+        dateStr = dateStr.replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '');
+        DateTime dt = DateTime.parse(dateStr);
+        DateTime dateKey = DateTime(dt.year, dt.month, dt.day);
+        _rankMap[dateKey] = item['rank'] ?? "C";
+      } catch (e) {
+        // ignore
+      }
+    }
+    setState(() {});
+  }
+
+  List<dynamic> _getEventsForDay(DateTime day) {
+    DateTime key = DateTime(day.year, day.month, day.day);
+    if (_rankMap.containsKey(key)) {
+      return [_rankMap[key]];
+    }
+    return [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TableCalendar(
+          locale: 'ja_JP',
+          firstDay: DateTime.now().subtract(const Duration(days: 1)),
+          lastDay: DateTime.now().add(const Duration(days: 90)),
+          focusedDay: _focusedDay,
+          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+          onDaySelected: (selectedDay, focusedDay) {
+            setState(() {
+              _selectedDay = selectedDay;
+              _focusedDay = focusedDay;
+            });
+          },
+          calendarFormat: CalendarFormat.month,
+          eventLoader: _getEventsForDay,
+          headerStyle: const HeaderStyle(
+            formatButtonVisible: false,
+            titleCentered: true,
+            titleTextStyle: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            leftChevronIcon: Icon(Icons.chevron_left, color: Colors.white),
+            rightChevronIcon: Icon(Icons.chevron_right, color: Colors.white),
+          ),
+          calendarStyle: const CalendarStyle(
+            defaultTextStyle: TextStyle(color: Colors.white),
+            weekendTextStyle: TextStyle(color: Colors.redAccent),
+            outsideTextStyle: TextStyle(color: Colors.grey),
+            todayDecoration: BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle),
+            selectedDecoration: BoxDecoration(color: Colors.amber, shape: BoxShape.circle),
+          ),
+          calendarBuilders: CalendarBuilders(
+            markerBuilder: (context, date, events) {
+              if (events.isEmpty) return null;
+              String rank = events.first as String;
+              Color color = Colors.grey;
+              if (rank == "S") color = AppColors.rankS_Start;
+              if (rank == "A") color = AppColors.rankA_Start;
+              if (rank == "B") color = AppColors.rankB_Start;
+              if (rank == "C") color = AppColors.rankC_Start;
+
+              return Positioned(
+                bottom: 1,
+                child: Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(
+          child: _selectedDay == null 
+          ? const Center(child: Text("日付をタップして詳細を確認", style: TextStyle(color: Colors.grey)))
+          : SingleChildScrollView( 
+              child: _buildSelectedDayInfo(),
+            ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSelectedDayInfo() {
+    var targetData = widget.allData.firstWhere((item) {
+      try {
+        String dateStr = item['date'].split(' ')[0];
+        dateStr = dateStr.replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '');
+        DateTime dt = DateTime.parse(dateStr);
+        return isSameDay(DateTime(dt.year, dt.month, dt.day), _selectedDay);
+      } catch (e) {
+        return false;
+      }
+    }, orElse: () => null);
+
+    if (targetData == null) return const Center(child: Text("データなし"));
+
+    String rank = targetData['rank'] ?? "-";
+    bool isLongTerm = targetData['is_long_term'] ?? true;
+    String dateLabel = targetData['date'];
+
+    return Container(
+      margin: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(dateLabel, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Text("需要予測ランク", style: const TextStyle(color: Colors.grey)),
+          Text(rank, style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: _getRankColor(rank))),
+          const SizedBox(height: 10),
+          if (isLongTerm)
+             const Text("※長期予測モード\n（過去の傾向に基づく予測です）", textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.grey))
+          else
+             const Text("✨AI詳細分析済み\n（イベント・天候加味）", textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.amber)),
+        ],
+      ),
+    );
+  }
+
+  Color _getRankColor(String rank) {
+    if (rank == "S") return AppColors.rankS_End;
+    if (rank == "A") return AppColors.rankA_End;
+    if (rank == "B") return AppColors.rankB_End;
+    return AppColors.rankC_End;
+  }
+}
+
+// ------------------------------
+// 📊 ダッシュボード
 // ------------------------------
 class DashboardPage extends StatelessWidget {
   final JobData selectedJob;
-  final List<dynamic> displayData; // 名前変更: allData -> displayData
+  final List<dynamic> displayData;
   final PageController pageController;
   const DashboardPage({super.key, required this.selectedJob, required this.displayData, required this.pageController});
 
   @override
   Widget build(BuildContext context) {
     if (displayData.isEmpty) return const Center(child: Text("データがありません"));
-    
     return PageView.builder(
       controller: pageController,
       itemCount: displayData.length,
@@ -612,16 +763,13 @@ class DailyReportView extends StatelessWidget {
   Widget build(BuildContext context) {
     String date = data['date'] ?? "";
     String rank = data['rank'] ?? "C";
-    bool isLongTerm = data['is_long_term'] ?? false; // 簡易データかどうか
+    bool isLongTerm = data['is_long_term'] ?? false;
 
-    // 天気情報 (簡易版の場合は予報待ちなどのテキストが入る)
     Map<String, dynamic> wOverview = data['weather_overview'] ?? {};
     String condition = wOverview['condition'] ?? "-";
     String high = wOverview['high'] ?? "-";
     String low = wOverview['low'] ?? "-";
     String rain = wOverview['rain'] ?? "-";
-    
-    // イベント情報
     Map<String, dynamic> events = data['events_info'] ?? {};
     String eventName = events['event_name'] ?? "";
     String trafficWarn = events['traffic_warning'] ?? "";
@@ -657,7 +805,6 @@ class DailyReportView extends StatelessWidget {
                       const SizedBox(height: 24),
                       _buildEventCard(eventName, "", trafficWarn),
                       const SizedBox(height: 30),
-                      // タイムライン表示 (データがある場合のみ)
                       if (data['timeline'] != null) ...[
                         const Align(alignment: Alignment.centerLeft, child: Text("Time Schedule", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                         const SizedBox(height: 16),
@@ -677,7 +824,6 @@ class DailyReportView extends StatelessWidget {
     );
   }
 
-  // --- カード系Widgetは変更なし ---
   Widget _buildMainCard(String rank, String label, String cond, String high, String low, String rain, List<Color> colors) {
     return Container(
       width: double.infinity, padding: const EdgeInsets.all(24),
@@ -718,7 +864,6 @@ class DailyReportView extends StatelessWidget {
   }
 }
 
-// カレンダーと色は変更なしのため省略せず使用
 List<Color> _getRankColors(String rank) {
   switch (rank) {
     case 'S': return [AppColors.rankS_Start, AppColors.rankS_End];
@@ -728,5 +873,3 @@ List<Color> _getRankColors(String rank) {
     default: return [Colors.grey, Colors.grey];
   }
 }
-// CalendarPageクラスは前の回答と同じなので、もしエラーが出たら連絡ください！
-// (コード長制限のため、CalendarPageの実装は前のものと全く同じです)
