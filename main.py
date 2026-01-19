@@ -44,41 +44,44 @@ TARGET_AREAS = {
     }
 }
 
-# --- 天気取得関数 (ケイスケさんの成功ロジック + リトライ強化) ---
+# --- 天気取得関数 ---
+def get_stats_from_hourly(hourly_data, start_hour, end_hour):
+    temps = hourly_data['temperature_2m'][start_hour:end_hour]
+    rains = hourly_data['precipitation_probability'][start_hour:end_hour]
+    codes = hourly_data['weather_code'][start_hour:end_hour]
+    if not temps: return {"max": "-", "min": "-", "rain": "-", "code": 0}
+    most_common_code = max(set(codes), key=codes.count)
+    return {"max": max(temps), "min": min(temps), "rain": max(rains), "code": most_common_code}
+
 def get_real_weather(lat, lon, date_obj):
     date_str = date_obj.strftime('%Y-%m-%d')
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&start_date={date_str}&end_date={date_str}"
     
     for attempt in range(3): # 3回リトライ
         try:
-            with urllib.request.urlopen(url, timeout=10) as response:
+            with urllib.request.urlopen(url, timeout=15) as response:
                 data = json.loads(response.read().decode())
                 
-                # 日次データ
                 daily = data['daily']
+                hourly = data['hourly']
+                
                 main_weather = {
                     "max_temp": daily['temperature_2m_max'][0],
                     "min_temp": daily['temperature_2m_min'][0],
                     "rain_prob": daily['precipitation_probability_max'][0],
                     "code": daily['weather_code'][0]
                 }
-
-                # 時間別データ（ピンポイント抽出）
-                hourly = data['hourly']
                 
-                # 朝 (8時のデータを代表に)
                 morning = {
                     "temp": hourly['temperature_2m'][8],
                     "rain": hourly['precipitation_probability'][8],
                     "code": hourly['weather_code'][8]
                 }
-                # 昼 (13時のデータを代表に)
                 daytime = {
                     "temp": hourly['temperature_2m'][13],
                     "rain": hourly['precipitation_probability'][13],
                     "code": hourly['weather_code'][13]
                 }
-                # 夜 (19時のデータを代表に)
                 night = {
                     "temp": hourly['temperature_2m'][19],
                     "rain": hourly['precipitation_probability'][19],
@@ -89,7 +92,7 @@ def get_real_weather(lat, lon, date_obj):
 
         except Exception as e:
             print(f"⚠️ 天気API取得エラー(試行{attempt+1}): {e}", flush=True)
-            time.sleep(2) # 少し待って再挑戦
+            time.sleep(2)
 
     return None
 
@@ -102,16 +105,14 @@ def get_weather_label(code):
     if code >= 95: return "雷雨"
     return "曇り"
 
-# --- モデル選択 (ケイスケさんの成功ロジック) ---
+# --- モデル選択 ---
 def get_model():
     genai.configure(api_key=API_KEY)
-    # 本命: 2.5 (models/付き)
     target_model = "models/gemini-2.5-flash"
     try:
         print(f"Testing model: {target_model}", flush=True)
         return genai.GenerativeModel(target_model)
     except:
-        # フォールバック: 1.5 (models/付きにして安全策)
         print("Fallback to 1.5-flash", flush=True)
         target_model = 'models/gemini-1.5-flash'
         return genai.GenerativeModel(target_model)
@@ -120,15 +121,12 @@ def get_model():
 def get_ai_advice(area_key, area_data, target_date, days_offset):
     if not API_KEY: return None
 
-    # 日付整形
     date_str = target_date.strftime('%Y年%m月%d日')
     weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
     full_date = f"{date_str} ({weekday_str})"
     
-    # ★実況天気取得
     real_weather = get_real_weather(area_data["lat"], area_data["lon"], target_date)
     
-    # 天気情報の文字列作成
     main_condition = "不明"
     w_info = "天気データ取得失敗。今の時期の気候を推測してください。"
     
@@ -182,7 +180,6 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
     }}
     """
     
-    # ケイスケさんのロジックでモデル取得
     try:
         model = get_model()
         res = model.generate_content(prompt)
@@ -191,7 +188,7 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
         print(f"⚠️ AI生成エラー: {e}", flush=True)
         return None
 
-# --- 簡易予測 (バックアップ) ---
+# --- 簡易予測 ---
 def get_simple_forecast(target_date):
     date_str = target_date.strftime('%Y年%m月%d日')
     weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
@@ -209,7 +206,7 @@ def get_simple_forecast(target_date):
 # --- メイン ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye 全国版(過去成功ロジック適用) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye 全国版(修正完了) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
@@ -224,7 +221,7 @@ if __name__ == "__main__":
                 data = get_ai_advice(area_key, area_data, target_date, i)
                 if data:
                     area_forecasts.append(data)
-                    time.sleep(1) # 成功したら1秒待機
+                    time.sleep(1) 
                 else:
                     print("⚠️ 生成失敗。簡易版を適用。", flush=True)
                     area_forecasts.append(get_simple_forecast(target_date))
@@ -234,4 +231,9 @@ if __name__ == "__main__":
         master_data[area_key] = area_forecasts
 
     if len(master_data) > 0:
-        with open("eagle_eye_data.json", "w",
+        # ★ここが修正箇所：ファイル書き込み部分を確実に記述
+        with open("eagle_eye_data.json", "w", encoding="utf-8") as f:
+            json.dump(master_data, f, ensure_ascii=False, indent=2)
+        print(f"✅ 全エリアデータ保存完了", flush=True)
+    else:
+        exit(1)
