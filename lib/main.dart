@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // クリップボード用
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:table_calendar/table_calendar.dart';
@@ -127,7 +127,6 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 🦅 イーグルアイ・アイコン演出
               Container(
                 padding: const EdgeInsets.all(30),
                 decoration: BoxDecoration(
@@ -315,8 +314,9 @@ class _MainContainerPageState extends State<MainContainerPage> {
     _fetchData();
   }
 
-  // ★修正箇所：データ取得ロジック
+  // ★修正箇所：無限ロード解消とキャッシュ対策
   Future<void> _fetchData() async {
+    // タイムスタンプをつけてキャッシュを回避
     final url = "https://eagle-eye-official.github.io/eagle_eye_pj/eagle_eye_data.json?t=${DateTime.now().millisecondsSinceEpoch}";
     try {
       final response = await http.get(Uri.parse(url));
@@ -325,16 +325,17 @@ class _MainContainerPageState extends State<MainContainerPage> {
         if (mounted) {
           setState(() {
             currentAreaDataList = allData[currentArea.id] ?? [];
+            isLoading = false; // 成功したらロード終了
           });
         }
       } else {
-        // データが見つからない場合(404など)
+        // データが見つからない場合もロード終了
         debugPrint("Data fetch error: ${response.statusCode}");
+        if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
       debugPrint("Error: $e");
-    } finally {
-      // ★重要：成功しても失敗しても必ずローディングを終了する
+      // エラー発生時も必ずロード終了
       if (mounted) setState(() => isLoading = false);
     }
   }
@@ -345,7 +346,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
       if (area != null) {
         currentArea = area;
         prefs.setString('selected_area_id', area.id);
-        isLoading = true;
+        isLoading = true; // エリア変更時はロード表示
         _fetchData();
       }
       if (job != null) {
@@ -362,9 +363,9 @@ class _MainContainerPageState extends State<MainContainerPage> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      DashboardPage(dataList: currentAreaDataList, job: currentJob, isLoading: isLoading),
-      CalendarPage(dataList: currentAreaDataList),
-      ProfilePage(area: currentArea, job: currentJob, age: currentAge, onUpdate: _updateSettings, fullData: currentAreaDataList),
+      DashboardPage(dataList: currentAreaDataList, job: currentJob, isLoading: isLoading, onRetry: _fetchData),
+      CalendarPage(dataList: currentAreaDataList, job: currentJob), // カレンダーにjobを渡す
+      ProfilePage(area: currentArea, job: currentJob, age: currentAge, onUpdate: _updateSettings),
     ];
 
     return Scaffold(
@@ -403,14 +404,15 @@ class DashboardPage extends StatelessWidget {
   final List<dynamic> dataList;
   final JobData job;
   final bool isLoading;
+  final VoidCallback onRetry;
 
-  const DashboardPage({super.key, required this.dataList, required this.job, required this.isLoading});
+  const DashboardPage({super.key, required this.dataList, required this.job, required this.isLoading, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) return const Center(child: CircularProgressIndicator(color: AppColors.accent));
     
-    // データがない場合の表示
+    // データがない場合の表示（リトライボタン付き）
     if (dataList.isEmpty) {
       return Center(
         child: Column(
@@ -420,7 +422,11 @@ class DashboardPage extends StatelessWidget {
             const SizedBox(height: 20),
             const Text("データが見つかりません\nまだ予測データが生成されていない可能性があります", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 20),
-            // リロードボタンは現状機能しないため、メッセージのみ
+            ElevatedButton(
+              onPressed: onRetry,
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+              child: const Text("再読み込み", style: TextStyle(color: Colors.black)),
+            ),
           ],
         ),
       );
@@ -593,72 +599,225 @@ class DashboardPage extends StatelessWidget {
 }
 
 // ------------------------------
-// 📅 カレンダー
+// 📅 カレンダー (修正版: タップ機能追加)
 // ------------------------------
-class CalendarPage extends StatelessWidget {
+class CalendarPage extends StatefulWidget {
   final List<dynamic> dataList;
-  const CalendarPage({super.key, required this.dataList});
+  final JobData job;
+  const CalendarPage({super.key, required this.dataList, required this.job});
+
+  @override
+  State<CalendarPage> createState() => _CalendarPageState();
+}
+
+class _CalendarPageState extends State<CalendarPage> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+  Map<String, dynamic>? _selectedDayData;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDay = _focusedDay;
+    _updateSelectedData(_selectedDay!);
+  }
+
+  void _updateSelectedData(DateTime date) {
+    final dateStr = _formatDate(date);
+    // 日付文字列でデータを検索
+    try {
+      final data = widget.dataList.firstWhere(
+        (item) => _isSameDateStr(item['date'], dateStr),
+        orElse: () => null
+      );
+      setState(() {
+        _selectedDayData = data;
+      });
+    } catch (e) {
+      setState(() {
+        _selectedDayData = null;
+      });
+    }
+  }
+  
+  // 日付の比較用ヘルパー
+  bool _isSameDateStr(String dateStrFromApi, String targetDateStr) {
+    // API形式: "2026年01月20日 (火)"
+    // ターゲット: "2026-01-20"
+    // 簡易的に先頭10文字で比較
+    final cleanApiDate = dateStrFromApi.replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '').split(' ')[0];
+    return cleanApiDate == targetDateStr;
+  }
+  
+  String _formatDate(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
+  }
 
   @override
   Widget build(BuildContext context) {
-    final rankMap = {
-      for (var item in dataList) 
-        _parseDate(item['date']): item['rank'] as String
-    };
-
-    return Column(
-      children: [
-        TableCalendar(
-          locale: 'ja_JP',
-          firstDay: DateTime.now().subtract(const Duration(days: 1)),
-          lastDay: DateTime.now().add(const Duration(days: 90)),
-          focusedDay: DateTime.now(),
-          calendarFormat: CalendarFormat.month,
-          headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
-          calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, date, events) {
-              final dateKey = DateTime(date.year, date.month, date.day);
-              if (rankMap.containsKey(dateKey)) {
-                final rank = rankMap[dateKey]!;
-                Color c = AppColors.rankC;
-                if(rank=="S") c=AppColors.rankS;
-                if(rank=="A") c=AppColors.rankA;
-                if(rank=="B") c=AppColors.rankB;
-                return Positioned(
-                  bottom: 1,
-                  child: Container(width: 6, height: 6, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-                );
-              }
-              return null;
-            },
-          ),
-        ),
-        const Expanded(child: Center(child: Text("日付をタップすると詳細が見れます\n(※現在は直近3日のみ詳細表示)")))
-      ],
-    );
-  }
-  
-  DateTime _parseDate(String dateStr) {
-    try {
-      final cleanStr = dateStr.split(' ')[0].replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '');
-      return DateTime.parse(cleanStr);
-    } catch (e) {
-      return DateTime.now();
+    // ランクマップ作成
+    final rankMap = <DateTime, String>{};
+    for (var item in widget.dataList) {
+      try {
+        final dateStr = item['date'].toString().split(' ')[0].replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '');
+        rankMap[DateTime.parse(dateStr)] = item['rank'];
+      } catch (e) {
+        // ignore error
+      }
     }
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          TableCalendar(
+            locale: 'ja_JP',
+            firstDay: DateTime.now().subtract(const Duration(days: 1)),
+            lastDay: DateTime.now().add(const Duration(days: 90)),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            calendarFormat: CalendarFormat.month,
+            headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay;
+              });
+              _updateSelectedData(selectedDay);
+            },
+            calendarBuilders: CalendarBuilders(
+              markerBuilder: (context, date, events) {
+                final dateKey = DateTime(date.year, date.month, date.day);
+                if (rankMap.containsKey(dateKey)) {
+                  final rank = rankMap[dateKey]!;
+                  Color c = AppColors.rankC;
+                  if(rank=="S") c=AppColors.rankS;
+                  if(rank=="A") c=AppColors.rankA;
+                  if(rank=="B") c=AppColors.rankB;
+                  return Positioned(
+                    bottom: 1,
+                    child: Container(width: 6, height: 6, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+                  );
+                }
+                return null;
+              },
+            ),
+          ),
+          const Divider(height: 30, color: Colors.grey),
+          
+          // 選択した日の詳細表示
+          if (_selectedDayData != null) ...[
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("選んだ日の予測: ${_selectedDayData!['date']}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  // Dashboardの部品を再利用して表示
+                  _SimpleRankCard(data: _selectedDayData!),
+                  const SizedBox(height: 20),
+                  _SimpleTimeline(data: _selectedDayData!, job: widget.job),
+                ],
+              ),
+            ),
+          ] else ...[
+             const Padding(
+               padding: EdgeInsets.all(20.0),
+               child: Text("この日の詳細データはありません", style: TextStyle(color: Colors.grey)),
+             ),
+          ]
+        ],
+      ),
+    );
   }
 }
 
+// カレンダー用の簡易表示ウィジェット
+class _SimpleRankCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _SimpleRankCard({required this.data});
+  @override
+  Widget build(BuildContext context) {
+    final rank = data['rank'] ?? "C";
+    final weather = data['weather_overview'] ?? {};
+    final condition = weather['condition'] ?? "☁️";
+    
+    Color color = AppColors.rankC;
+    String text = "閑散";
+    if (rank == "S") { color = AppColors.rankS; text = "激混み"; }
+    if (rank == "A") { color = AppColors.rankA; text = "混雑"; }
+    if (rank == "B") { color = AppColors.rankB; text = "普通"; }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          Text(rank, style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: color)),
+          Text(text, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(condition, style: const TextStyle(fontSize: 30)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimpleTimeline extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final JobData job;
+  const _SimpleTimeline({required this.data, required this.job});
+  @override
+  Widget build(BuildContext context) {
+    final timeline = data['timeline'];
+    if (timeline == null) return const Text("詳細タイムラインなし");
+    
+    // 朝・昼・夜のアドバイスを抽出
+    String getAdvice(String timeKey) {
+      if (timeline[timeKey] == null) return "-";
+      return timeline[timeKey]['advice']?[job.id] ?? "特になし";
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("あなたへのアドバイス", style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+        const SizedBox(height: 8),
+        _row("朝", getAdvice("morning")),
+        const SizedBox(height: 8),
+        _row("昼", getAdvice("daytime")),
+        const SizedBox(height: 8),
+        _row("夜", getAdvice("night")),
+      ],
+    );
+  }
+
+  Widget _row(String label, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 30, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+      ],
+    );
+  }
+}
+
+
 // ------------------------------
-// 👤 設定 & CSV出力
+// 👤 設定 (CSVボタン削除版)
 // ------------------------------
 class ProfilePage extends StatelessWidget {
   final AreaData area;
   final JobData job;
   final String age;
   final Function({AreaData? area, JobData? job, String? age}) onUpdate;
-  final List<dynamic> fullData;
 
-  const ProfilePage({super.key, required this.area, required this.job, required this.age, required this.onUpdate, required this.fullData});
+  const ProfilePage({super.key, required this.area, required this.job, required this.age, required this.onUpdate});
 
   @override
   Widget build(BuildContext context) {
@@ -673,21 +832,12 @@ class ProfilePage extends StatelessWidget {
           _item("職業", job.label, () => _showJobPicker(context)),
           _item("年代", age, () => _showAgePicker(context)),
           
+          // ★修正箇所：データ活用(CSVダウンロード)ボタンを削除しました
           const SizedBox(height: 40),
-          const Text("データ活用", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          ElevatedButton.icon(
-            onPressed: () => _showCsvDialog(context),
-            icon: const Icon(Icons.download),
-            label: const Text("分析データをCSVで取得"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              minimumSize: const Size(double.infinity, 50),
-            ),
-          ),
+          const Divider(color: Colors.grey),
           const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: Text("※企業への提供やご自身の分析用に、全期間のデータをCSV形式でコピーできます。", style: TextStyle(color: Colors.grey, fontSize: 12)),
+            child: Center(child: Text("App Version 1.0.0", style: TextStyle(color: Colors.grey, fontSize: 12))),
           ),
         ],
       ),
@@ -703,47 +853,6 @@ class ProfilePage extends StatelessWidget {
         subtitle: Text(val, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
         trailing: const Icon(Icons.edit, color: AppColors.primary),
         onTap: onTap,
-      ),
-    );
-  }
-
-  void _showCsvDialog(BuildContext context) {
-    String csv = "日付,ランク,天気概況,最高気温,最低気温,イベント情報\n";
-    for (var item in fullData) {
-      final date = item['date'] ?? "";
-      final rank = item['rank'] ?? "";
-      final w = item['weather_overview'] ?? {};
-      final cond = w['condition'] ?? "";
-      final high = w['high'] ?? "";
-      final low = w['low'] ?? "";
-      final info = (item['daily_schedule_and_impact'] ?? "なし").toString().replaceAll("\n", " ");
-      csv += "$date,$rank,$cond,$high,$low,$info\n";
-    }
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.cardBackground,
-        title: const Text("CSVデータ"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("以下のテキストを全選択してコピーし、Excel等に貼り付けてください。", style: TextStyle(fontSize: 12)),
-              const SizedBox(height: 10),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: SelectableText(csv, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () { Clipboard.setData(ClipboardData(text: csv)); }, child: const Text("クリップボードにコピー")),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("閉じる")),
-        ],
       ),
     );
   }
