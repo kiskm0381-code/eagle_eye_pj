@@ -47,34 +47,34 @@ TARGET_AREAS = {
 
 # --- 天気コードを絵文字に変換 ---
 def get_weather_emoji(code):
-    if code == 0: return "☀️" # 快晴
-    if code in [1, 2]: return "🌤️" # 晴れ時々曇り
-    if code == 3: return "☁️" # 曇り
-    if code in [45, 48]: return "🌫️" # 霧
-    if code in [51, 53, 55]: return "🌧️" # 小雨
-    if code in [61, 63, 65]: return "☔" # 雨
-    if code in [80, 81, 82]: return "⛈️" # にわか雨
-    if code in [71, 73, 75, 77, 85, 86]: return "⛄" # 雪
-    if code >= 95: return "⛈️" # 雷雨
-    return "☁️" # デフォルト
+    if code == 0: return "☀️"
+    if code in [1, 2]: return "🌤️"
+    if code == 3: return "☁️"
+    if code in [45, 48]: return "🌫️"
+    if code in [51, 53, 55]: return "🌧️"
+    if code in [61, 63, 65]: return "☔"
+    if code in [80, 81, 82]: return "⛈️"
+    if code in [71, 73, 75, 77, 85, 86]: return "⛄"
+    if code >= 95: return "⛈️"
+    return "☁️"
 
 # --- 降水確率を10%単位に丸める ---
 def round_prob(prob):
     return math.ceil(prob / 10) * 10
 
-# --- 天気取得関数 (強化版: 絵文字、午前/午後確率) ---
+# --- 天気取得関数 ---
 def get_real_weather(lat, lon, date_obj):
     date_str = date_obj.strftime('%Y-%m-%d')
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&start_date={date_str}&end_date={date_str}"
     
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(url, timeout=15) as response:
+            with urllib.request.urlopen(url, timeout=30) as response:
                 data = json.loads(response.read().decode())
                 daily = data['daily']
                 hourly = data['hourly']
                 
-                # 午前(6-12時)と午後(12-18時)の最大降水確率を計算
+                # 午前(6-12時)と午後(12-18時)の最大降水確率
                 prob_am = round_prob(max(hourly['precipitation_probability'][6:12]))
                 prob_pm = round_prob(max(hourly['precipitation_probability'][12:18]))
                 rain_str = f"午前{prob_am}% / 午後{prob_pm}%"
@@ -87,7 +87,6 @@ def get_real_weather(lat, lon, date_obj):
                     "emoji": get_weather_emoji(daily['weather_code'][0])
                 }
                 
-                # 時間別データ（ピンポイント抽出＆絵文字化）
                 morning = {
                     "temp": hourly['temperature_2m'][8],
                     "rain": hourly['precipitation_probability'][8],
@@ -108,25 +107,30 @@ def get_real_weather(lat, lon, date_obj):
 
         except Exception as e:
             print(f"⚠️ 天気API取得エラー(試行{attempt+1}): {e}", flush=True)
-            time.sleep(2)
+            time.sleep(5)
 
     return None
 
-# --- モデル選択 (Google検索を有効化) ---
+# --- モデル選択 (修正版: google_searchを指定) ---
 def get_model():
     genai.configure(api_key=API_KEY)
+    
+    # 最新のツール名指定に変更
+    tools_config = [
+        {"google_search": {}}  # 新しい辞書形式での指定
+    ]
+    
     target_model = "models/gemini-2.5-flash"
-    # ★ここで tools='google_search_retrieval' を指定して検索機能をONにする
-    tools = 'google_search_retrieval'
     try:
         print(f"Testing model: {target_model} with Google Search", flush=True)
-        return genai.GenerativeModel(target_model, tools=tools)
+        # tools引数にリスト形式で渡すのが確実
+        return genai.GenerativeModel(target_model, tools=tools_config)
     except:
         print("Fallback to 1.5-flash with Google Search", flush=True)
         target_model = 'models/gemini-1.5-flash'
-        return genai.GenerativeModel(target_model, tools=tools)
+        return genai.GenerativeModel(target_model, tools=tools_config)
 
-# --- AI生成 (プロンプト大改造) ---
+# --- AI生成 ---
 def get_ai_advice(area_key, area_data, target_date, days_offset):
     if not API_KEY: return None
 
@@ -141,7 +145,7 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
     w_info = "天気データ取得失敗。今の時期の気候を推測してください。"
     
     if real_weather:
-        main_condition = real_weather['main']['emoji'] # 絵文字を使う
+        main_condition = real_weather['main']['emoji']
         w_info = f"""
         【実況天気予報データ (信頼度高)】
         全体: {real_weather['main']['emoji']} 最高{real_weather['main']['max_temp']}℃ / 最低{real_weather['main']['min_temp']}℃ / 降水確率: {real_weather['main']['rain_str']}
@@ -149,12 +153,9 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
         昼(13:00): {real_weather['daytime']['emoji']} {real_weather['daytime']['temp']}℃ / 降水{real_weather['daytime']['rain']}%
         夜(19:00): {real_weather['night']['emoji']} {real_weather['night']['temp']}℃ / 降水{real_weather['night']['rain']}%
         """
-    else:
-        print(f"⚠️ {area_data['name']} の天気データが取得できませんでした。", flush=True)
 
     print(f"🤖 [AI予測] {area_data['name']} / {full_date} 生成開始(Google検索実行中)...", flush=True)
 
-    # ★プロンプトを大幅強化
     prompt = f"""
     あなたは「{area_data['name']}」の地域特性に精通し、Google検索を駆使して最新情報を収集できる高度な観光コンサルタントAIです。
     Target Date: {full_date}
@@ -166,14 +167,14 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
     2. **ランク判定の厳格化 (特に函館):**
        - 平日({weekday_str}曜)は、Google検索で**明確な大規模イベントやクルーズ船寄港**が確認できない限り、原則としてランクを「C(閑散)」または「B(普通)」とせよ。安易に「A」をつけてはならない。
     3. **天気情報の絶対遵守:**
-       - 以下の実況天気予報データに基づき、矛盾のないアドバイスを行え。特に雨や雪の影響を考慮せよ。
+       - 以下の実況天気予報データに基づき、矛盾のないアドバイスを行え。
        {w_info}
 
     【出力要件 (JSON形式のみ)】
-    - `rank`: S/A/B/C のいずれか。根拠に基づき厳格に判定。
+    - `rank`: S/A/B/C のいずれか。
     - `weather_overview`: `condition`(絵文字), `high`(最高気温), `low`(最低気温), `rain`(午前/午後の確率文字列) を正確に記載。
-    - `daily_schedule_and_impact`: **ここが重要。** Google検索で得た具体的なイベント、クルーズ船の着岸・離岸時間、それらが交通や店舗に与える影響、注意点を時系列で詳細に記述せよ。情報がない場合は「特段のイベント情報なし」と記載。
-    - `timeline`: 朝・昼・夜の天気絵文字、気温、降水確率と、以下の全職業に対する具体的アドバイス。
+    - `daily_schedule_and_impact`: Google検索で得たイベント時間、クルーズ船着岸・離岸時間、交通影響などを詳細に記述。
+    - `timeline`: 各時間帯の天気・気温・降水確率と、各職業へのアドバイス。
       - 対象職業: タクシー, 飲食店, ホテル, 小売店, 物流, コンビニ, 建設・現場, デリバリー, イベント・警備
 
     ```json
@@ -185,7 +186,7 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
             "low": "{real_weather['main']['min_temp'] if real_weather else '-'}℃", 
             "rain": "{real_weather['main']['rain_str'] if real_weather else '-'}%" 
         }},
-        "daily_schedule_and_impact": "Google検索結果に基づく、具体的なイベント時間、クルーズ船情報、交通影響などの詳細な記述...",
+        "daily_schedule_and_impact": "Google検索結果に基づく詳細情報...",
         "timeline": {{
             "morning": {{ 
                 "weather": "{real_weather['morning']['emoji'] if real_weather else '-'}", 
@@ -215,7 +216,7 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
         res = model.generate_content(prompt)
         return json.loads(res.text.replace("```json", "").replace("```", "").strip())
     except Exception as e:
-        print(f"⚠️ AI生成エラー(Google検索含む): {e}", flush=True)
+        print(f"⚠️ AI生成エラー: {e}", flush=True)
         return None
 
 # --- 簡易予測 ---
@@ -224,9 +225,9 @@ def get_simple_forecast(target_date):
     weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
     full_date = f"{date_str} ({weekday_str})"
     rank = "C"
-    if target_date.weekday() == 5: rank = "B" # 土曜はB
-    elif target_date.weekday() == 6: rank = "C" # 日曜はC
-    elif target_date.weekday() == 4: rank = "B" # 金曜はB
+    if target_date.weekday() == 5: rank = "B"
+    elif target_date.weekday() == 6: rank = "C"
+    elif target_date.weekday() == 4: rank = "B"
     
     return {
         "date": full_date, "is_long_term": True, "rank": rank,
@@ -238,7 +239,7 @@ def get_simple_forecast(target_date):
 # --- メイン ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye 全国版(Google検索・厳格ランク・絵文字天気) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye 全国版(Google検索対応修正版) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
@@ -248,12 +249,12 @@ if __name__ == "__main__":
         
         for i in range(90):
             target_date = today + timedelta(days=i)
-            # 直近3日のみAI（Google検索）を使用
+            # 直近3日のみAI
             if i < 3:
                 data = get_ai_advice(area_key, area_data, target_date, i)
                 if data:
                     area_forecasts.append(data)
-                    time.sleep(2) # 検索負荷を考慮して少し待つ
+                    time.sleep(2)
                 else:
                     print("⚠️ 生成失敗。簡易版を適用。", flush=True)
                     area_forecasts.append(get_simple_forecast(target_date))
