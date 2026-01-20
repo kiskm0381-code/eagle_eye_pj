@@ -111,24 +111,19 @@ def get_real_weather(lat, lon, date_obj):
 
     return None
 
-# --- モデル選択 (修正版: google_searchを指定) ---
+# --- モデル選択 (安定版: tools指定なし) ---
 def get_model():
     genai.configure(api_key=API_KEY)
     
-    # 最新のツール名指定に変更
-    tools_config = [
-        {"google_search": {}}  # 新しい辞書形式での指定
-    ]
-    
+    # ★修正：tools引数を削除し、純粋なモデル呼び出しにする
     target_model = "models/gemini-2.5-flash"
     try:
-        print(f"Testing model: {target_model} with Google Search", flush=True)
-        # tools引数にリスト形式で渡すのが確実
-        return genai.GenerativeModel(target_model, tools=tools_config)
+        print(f"Testing model: {target_model}", flush=True)
+        return genai.GenerativeModel(target_model)
     except:
-        print("Fallback to 1.5-flash with Google Search", flush=True)
+        print("Fallback to 1.5-flash", flush=True)
         target_model = 'models/gemini-1.5-flash'
-        return genai.GenerativeModel(target_model, tools=tools_config)
+        return genai.GenerativeModel(target_model)
 
 # --- AI生成 ---
 def get_ai_advice(area_key, area_data, target_date, days_offset):
@@ -154,26 +149,24 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
         夜(19:00): {real_weather['night']['emoji']} {real_weather['night']['temp']}℃ / 降水{real_weather['night']['rain']}%
         """
 
-    print(f"🤖 [AI予測] {area_data['name']} / {full_date} 生成開始(Google検索実行中)...", flush=True)
+    print(f"🤖 [AI予測] {area_data['name']} / {full_date} 生成開始...", flush=True)
 
     prompt = f"""
-    あなたは「{area_data['name']}」の地域特性に精通し、Google検索を駆使して最新情報を収集できる高度な観光コンサルタントAIです。
+    あなたは「{area_data['name']}」の地域特性に精通した観光コンサルタントAIです。
     Target Date: {full_date}
     Area Feature: {area_data['feature']}
     
     【重要指令】
-    1. **Google検索を積極的に活用し、裏付けのある情報を取得せよ。**
-       - 検索クエリ例: "{area_data['name']} イベント {date_str}", "{area_data['name']} クルーズ船 入港予定 {date_str[:7]}", "{area_data['name']} 交通規制 {date_str}"
-    2. **ランク判定の厳格化 (特に函館):**
-       - 平日({weekday_str}曜)は、Google検索で**明確な大規模イベントやクルーズ船寄港**が確認できない限り、原則としてランクを「C(閑散)」または「B(普通)」とせよ。安易に「A」をつけてはならない。
-    3. **天気情報の絶対遵守:**
+    1. **ランク判定の厳格化 (特に函館):**
+       - 平日({weekday_str}曜)は、原則としてランクを「C(閑散)」または「B(普通)」とせよ。安易に「A」をつけてはならない。
+    2. **天気情報の絶対遵守:**
        - 以下の実況天気予報データに基づき、矛盾のないアドバイスを行え。
        {w_info}
 
     【出力要件 (JSON形式のみ)】
     - `rank`: S/A/B/C のいずれか。
     - `weather_overview`: `condition`(絵文字), `high`(最高気温), `low`(最低気温), `rain`(午前/午後の確率文字列) を正確に記載。
-    - `daily_schedule_and_impact`: Google検索で得たイベント時間、クルーズ船着岸・離岸時間、交通影響などを詳細に記述。
+    - `daily_schedule_and_impact`: この地域の一般的な平日・休日の傾向、予想される混雑時間帯、天候による影響などを具体的に記述。
     - `timeline`: 各時間帯の天気・気温・降水確率と、各職業へのアドバイス。
       - 対象職業: タクシー, 飲食店, ホテル, 小売店, 物流, コンビニ, 建設・現場, デリバリー, イベント・警備
 
@@ -186,7 +179,7 @@ def get_ai_advice(area_key, area_data, target_date, days_offset):
             "low": "{real_weather['main']['min_temp'] if real_weather else '-'}℃", 
             "rain": "{real_weather['main']['rain_str'] if real_weather else '-'}%" 
         }},
-        "daily_schedule_and_impact": "Google検索結果に基づく詳細情報...",
+        "daily_schedule_and_impact": "分析コメント...",
         "timeline": {{
             "morning": {{ 
                 "weather": "{real_weather['morning']['emoji'] if real_weather else '-'}", 
@@ -239,7 +232,7 @@ def get_simple_forecast(target_date):
 # --- メイン ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye 全国版(Google検索対応修正版) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye 全国版(安定重視版) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
@@ -254,7 +247,7 @@ if __name__ == "__main__":
                 data = get_ai_advice(area_key, area_data, target_date, i)
                 if data:
                     area_forecasts.append(data)
-                    time.sleep(2)
+                    time.sleep(1) # 1秒待機
                 else:
                     print("⚠️ 生成失敗。簡易版を適用。", flush=True)
                     area_forecasts.append(get_simple_forecast(target_date))
