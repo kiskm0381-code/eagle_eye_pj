@@ -127,6 +127,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 🦅 イーグルアイ・アイコン演出
               Container(
                 padding: const EdgeInsets.all(30),
                 decoration: BoxDecoration(
@@ -315,6 +316,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
   }
 
   Future<void> _fetchData() async {
+    // キャッシュ回避のタイムスタンプ
     final url = "https://eagle-eye-official.github.io/eagle_eye_pj/eagle_eye_data.json?t=${DateTime.now().millisecondsSinceEpoch}";
     try {
       final response = await http.get(Uri.parse(url));
@@ -507,9 +509,9 @@ class DashboardPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(children: [
-            Icon(Icons.search, color: AppColors.accent),
+            Icon(Icons.analytics, color: AppColors.accent),
             SizedBox(width: 8),
-            Text("AI詳細分析レポート (Google検索)", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
+            Text("AI詳細分析レポート", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
           ]),
           const SizedBox(height: 12),
           Text(info, style: const TextStyle(fontSize: 14, height: 1.6)),
@@ -527,7 +529,7 @@ class DashboardPage extends StatelessWidget {
       children: [
         const Text("時間ごとの天気 & アドバイス", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
-        // ★修正ポイント：引数の順序を修正しました
+        // ★修正済み：引数順序を統一 (Label, Data, Job)
         _timeSlot("朝 (05-11)", timeline['morning'], job),
         _timeSlot("昼 (11-16)", timeline['daytime'], job),
         _timeSlot("夜 (16-24)", timeline['night'], job),
@@ -535,7 +537,6 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  // ★修正ポイント：関数の引数順序を呼び出し側に合わせました (String label, Map? slot, JobData job)
   Widget _timeSlot(String label, Map<String, dynamic>? slot, JobData job) {
     if (slot == null) return const SizedBox.shrink();
     final adviceMap = slot['advice'] ?? {};
