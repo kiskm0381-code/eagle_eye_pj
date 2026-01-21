@@ -12,7 +12,7 @@ import requests # 直接通信用
 API_KEY = os.environ.get("GEMINI_API_KEY")
 JST = timezone(timedelta(hours=9), 'JST')
 
-# --- 戦略的30地点定義 (JMAコード: 府県予報区 XX0000 形式) ---
+# --- 戦略的30地点定義 ---
 TARGET_AREAS = {
     # --- 北海道・東北 ---
     "hakodate": { "name": "北海道 函館", "jma_code": "014100", "feature": "観光・夜景・海鮮。冬は雪の影響大。クルーズ船寄港地。" },
@@ -54,21 +54,16 @@ TARGET_AREAS = {
 
 # --- JMA API 取得・解析 ---
 def get_jma_forecast(area_code):
-    """気象庁APIから天気、気温、降水確率、注意報を取得"""
-    forecast_url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
+    url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
     warning_url = f"https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
-    
     result = {"forecasts": [], "warning": "特になし"}
     
-    # 1. 予報データの取得
+    # 天気予報
     try:
-        with urllib.request.urlopen(forecast_url, timeout=15) as res:
+        with urllib.request.urlopen(url, timeout=15) as res:
             data = json.loads(res.read().decode('utf-8'))
+            if not data or "timeSeries" not in data[0]: raise ValueError("JSON invalid")
             
-            # データ構造チェック
-            if not data or "timeSeries" not in data[0]:
-                raise ValueError("Unexpected JSON structure")
-
             weather_series = data[0]["timeSeries"][0]
             rain_series = data[0]["timeSeries"][1]
             temp_series = data[0]["timeSeries"][2]
@@ -78,30 +73,25 @@ def get_jma_forecast(area_code):
             temps = temp_series["areas"][0].get("temps", [])
             
             def get_val(arr, idx): return arr[idx] if len(arr) > idx else "-"
-
-            result["forecasts"] = [
-                {
-                    "code": get_val(weathers, 0),
-                    "rain_am": get_val(rains, 0),
-                    "rain_pm": get_val(rains, 1),
-                    # 気温は配列の最後が最高気温のことが多い
-                    "high": temps[-1] if temps else "-", 
-                    "low": temps[0] if temps else "-"
-                }
-            ]
+            
+            result["forecasts"] = [{
+                "code": get_val(weathers, 0),
+                "rain_am": get_val(rains, 0),
+                "rain_pm": get_val(rains, 1),
+                "high": temps[-1] if temps else "-", 
+                "low": temps[0] if temps else "-"
+            }]
     except Exception as e:
-        print(f"JMA Forecast Error ({area_code}): {e}")
+        # print(f"JMA Error: {e}") 
         result["forecasts"] = [{"code": "200", "rain_am": "-", "rain_pm": "-", "high": "-", "low": "-"}]
 
-    # 2. 警報・注意報の取得
+    # 注意報・警報
     try:
-        with urllib.request.urlopen(warning_url, timeout=10) as res:
+        with urllib.request.urlopen(warning_url, timeout=5) as res:
             w_data = json.loads(res.read().decode('utf-8'))
             if "headlineText" in w_data and w_data["headlineText"]:
                  result["warning"] = w_data["headlineText"]
-    except:
-        pass
-
+    except: pass
     return result
 
 def get_weather_emoji_jma(jma_code):
@@ -112,65 +102,59 @@ def get_weather_emoji_jma(jma_code):
         if code in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212]: return "☁️"
         if 300 <= code < 400: return "☔"
         if 400 <= code < 500: return "⛄"
-    except:
-        pass
+    except: pass
     return "☁️"
 
-# --- JSON抽出 (エラー防止) ---
 def extract_json_block(text):
     try:
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match: return match.group(0)
         return text
-    except:
-        return text
+    except: return text
 
 # --- Google Gemini 直接通信 (REST API) ---
-def call_gemini_api(prompt, enable_search=True):
+def call_gemini_api(prompt, model_name="gemini-2.5-flash", enable_search=True):
     """
     Pythonライブラリを使わず、直接HTTPリクエストでGemini APIを叩く。
     """
-    model_name = "gemini-1.5-flash"
+    # エンドポイントの構築
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
     
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = { "Content-Type": "application/json" }
     
-    # ツール設定（Google検索）
+    # ★修正ポイント: REST API仕様に基づく正しい検索ツールの定義
     tools = []
     if enable_search:
-        tools = [{"googleSearch": {}}]
+        # JSON Payloadでは "googleSearch" (キャメルケース) が正解
+        tools = [{ "googleSearch": {} }]
 
     payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
+        "contents": [{ "parts": [{"text": prompt}] }],
         "tools": tools,
         "generationConfig": {
             "temperature": 0.7,
-            "responseMimeType": "application/json"
+            "responseMimeType": "application/json" # JSONモード
         }
     }
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
+        
+        # エラーハンドリング (404などはモデル名違いの可能性)
         if response.status_code != 200:
-            print(f"⚠️ Gemini API Error: {response.status_code} {response.text}", flush=True)
-            # 検索ツールが原因でエラーになった場合、検索なしでリトライするロジック
-            if enable_search and response.status_code == 400:
-                print("🔄 検索ツールを除外してリトライします...", flush=True)
-                return call_gemini_api(prompt, enable_search=False)
+            print(f"⚠️ API Error ({model_name}): {response.status_code} {response.text}", flush=True)
+            
+            # 2.5がまだ使えない(404)場合は、1.5にフォールバック
+            if response.status_code == 404 and "gemini-2.5" in model_name:
+                print("🔄 gemini-1.5-flash に切り替えてリトライ...", flush=True)
+                return call_gemini_api(prompt, model_name="gemini-1.5-flash", enable_search=enable_search)
+                
             return None
             
         data = response.json()
-        # レスポンスからテキストを抽出
         if "candidates" in data and len(data["candidates"]) > 0:
-            content = data["candidates"][0]["content"]["parts"][0]["text"]
-            return content
-        else:
-            print(f"⚠️ Gemini API Empty Response: {data}", flush=True)
-            return None
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        return None
 
     except Exception as e:
         print(f"⚠️ Network Error: {e}", flush=True)
@@ -209,7 +193,7 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
     天気: {w_emoji}, 気温: 最高{high_temp}℃/最低{low_temp}℃, 降水: {rain_display}, 警報: {warning_text}
 
     【重要指令】
-    1. **Google検索を実行せよ:** "{area_data['name']} イベント {date_str}", "{area_data['name']} 混雑予想" などを検索せよ。
+    1. **Google検索を実行せよ:** "{area_data['name']} イベント {date_str}", "{area_data['name']} 混雑予想" などを検索し、イベント名や動向を特定せよ。
     2. **挨拶不要:** いきなり分析結果から書け。
     3. **レポート構成:**
        - タイトル: 「{date_display}のレポート」
@@ -236,15 +220,14 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
     }}
     """
     
-    # 直接API呼び出し
-    json_text = call_gemini_api(prompt, enable_search=True)
+    # 2.5-flash でトライ
+    json_text = call_gemini_api(prompt, model_name="gemini-2.5-flash", enable_search=True)
     
     if json_text:
         try:
             return json.loads(extract_json_block(json_text))
         except:
-            print("⚠️ JSON Parse Error", flush=True)
-            return None
+            pass
     return None
 
 # --- 簡易予測 (長期・エラー時用) ---
@@ -266,7 +249,7 @@ def get_simple_forecast(target_date):
 # --- メイン ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye 30地点・REST API直通信版 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye 30地点・REST API直通信版(2.5) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
