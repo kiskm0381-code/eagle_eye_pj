@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
+// web専用の機能を使うための条件付きインポート
+import 'dart:html' as html; 
 import 'package:http/http.dart' as http;
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -18,8 +20,8 @@ class AppColors {
   static const cardBackground = Color(0xFF1E293B);
   static const primary = Color(0xFF3B82F6); // 鮮やかなブルー
   static const accent = Color(0xFFF59E0B); // ゴールド（鷲の目）
+  static const action = Color(0xFFFF6D00); // エマージェンシーオレンジ（アクション用）
   
-  // ランク別カラー
   static const rankS = Color(0xFFEF4444); // 赤
   static const rankA = Color(0xFFF97316); // オレンジ
   static const rankB = Color(0xFF3B82F6); // 青
@@ -43,14 +45,44 @@ class AreaData {
   const AreaData(this.id, this.name);
 }
 
-// エリア定義
+// ★戦略的30地点定義 (Pythonと完全一致)
 final List<AreaData> kAvailableAreas = [
-  AreaData("hakodate", "北海道 函館市"),
-  AreaData("osaka_hokusetsu", "大阪 北摂 (豊中・新大阪)"),
+  // 北海道・東北
+  AreaData("hakodate", "北海道 函館"),
+  AreaData("sapporo", "北海道 札幌"),
+  AreaData("sendai", "宮城 仙台"),
+  // 東京・関東
+  AreaData("tokyo_marunouchi", "東京 丸の内・東京駅"),
+  AreaData("tokyo_ginza", "東京 銀座・新橋"),
+  AreaData("tokyo_shinjuku", "東京 新宿・歌舞伎町"),
+  AreaData("tokyo_shibuya", "東京 渋谷・原宿"),
+  AreaData("tokyo_roppongi", "東京 六本木・赤坂"),
+  AreaData("tokyo_ikebukuro", "東京 池袋"),
+  AreaData("tokyo_shinagawa", "東京 品川・高輪"),
+  AreaData("tokyo_ueno", "東京 上野"),
+  AreaData("tokyo_asakusa", "東京 浅草"),
+  AreaData("tokyo_akihabara", "東京 秋葉原・神田"),
+  AreaData("tokyo_omotesando", "東京 表参道・青山"),
+  AreaData("tokyo_ebisu", "東京 恵比寿・代官山"),
+  AreaData("tokyo_odaiba", "東京 お台場・有明"),
+  AreaData("tokyo_toyosu", "東京 豊洲・湾岸"),
+  AreaData("tokyo_haneda", "東京 羽田空港エリア"),
+  AreaData("chiba_maihama", "千葉 舞浜(ディズニー)"),
+  AreaData("kanagawa_yokohama", "神奈川 横浜"),
+  // 中部
+  AreaData("aichi_nagoya", "愛知 名古屋"),
+  // 関西
   AreaData("osaka_kita", "大阪 キタ (梅田)"),
   AreaData("osaka_minami", "大阪 ミナミ (難波)"),
-  AreaData("osaka_bay", "大阪 ベイエリア (USJ)"),
+  AreaData("osaka_hokusetsu", "大阪 北摂"),
+  AreaData("osaka_bay", "大阪 ベイエリア(USJ)"),
   AreaData("osaka_tennoji", "大阪 天王寺・阿倍野"),
+  AreaData("kyoto_shijo", "京都 四条河原町"),
+  AreaData("hyogo_kobe", "兵庫 神戸(三宮)"),
+  // 中国・九州・沖縄
+  AreaData("hiroshima", "広島"),
+  AreaData("fukuoka", "福岡 博多・中洲"),
+  AreaData("okinawa_naha", "沖縄 那覇"),
 ];
 
 // 職業定義
@@ -68,6 +100,17 @@ final List<JobData> kInitialJobList = [
 
 final List<String> kAgeGroups = ["10代", "20代", "30代", "40代", "50代", "60代以上"];
 
+// 2026年の祝日リスト (簡易版)
+final Set<DateTime> kHolidays2026 = {
+  DateTime(2026, 1, 1), DateTime(2026, 1, 12), DateTime(2026, 2, 11),
+  DateTime(2026, 2, 23), DateTime(2026, 3, 20), DateTime(2026, 4, 29),
+  DateTime(2026, 5, 3), DateTime(2026, 5, 4), DateTime(2026, 5, 5),
+  DateTime(2026, 5, 6), DateTime(2026, 7, 20), DateTime(2026, 8, 11),
+  DateTime(2026, 9, 21), DateTime(2026, 9, 22), DateTime(2026, 9, 23),
+  DateTime(2026, 10, 12), DateTime(2026, 11, 3), DateTime(2026, 11, 23),
+  DateTime(2026, 11, 24),
+};
+
 // --- アプリ本体 ---
 class EagleEyeApp extends StatelessWidget {
   const EagleEyeApp({super.key});
@@ -78,8 +121,14 @@ class EagleEyeApp extends StatelessWidget {
       title: 'Eagle Eye',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: AppColors.background,
-        colorScheme: const ColorScheme.dark(primary: AppColors.primary, surface: AppColors.cardBackground),
+        colorScheme: const ColorScheme.dark(primary: AppColors.primary, surface: AppColors.cardBackground, secondary: AppColors.action),
         appBarTheme: const AppBarTheme(backgroundColor: AppColors.background, elevation: 0),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.action, // アクションカラー適用
+            foregroundColor: Colors.white,
+          ),
+        ),
       ),
       home: const SplashPage(),
     );
@@ -102,11 +151,12 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(duration: const Duration(seconds: 2), vsync: this);
+    _controller = AnimationController(duration: const Duration(seconds: 1), vsync: this); // 高速化
     _opacity = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
     _controller.forward();
     
-    Future.delayed(const Duration(seconds: 3), () {
+    // 待機時間を1.5秒に短縮 (体感速度向上)
+    Future.delayed(const Duration(milliseconds: 1500), () {
       if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const BootLoader()));
     });
   }
@@ -127,19 +177,20 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // ロゴ画像表示
               Container(
-                padding: const EdgeInsets.all(30),
+                width: 200, height: 200,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: AppColors.accent, width: 4),
                   boxShadow: [BoxShadow(color: AppColors.accent.withOpacity(0.5), blurRadius: 30)],
+                  image: const DecorationImage(image: AssetImage('assets/image.png'), fit: BoxFit.cover),
                 ),
-                child: const Icon(Icons.remove_red_eye_rounded, size: 80, color: AppColors.accent),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 30),
               const Text("EAGLE EYE", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4, color: AppColors.accent)),
               const SizedBox(height: 10),
-              const Text("Future Demand Forecast", style: TextStyle(color: Colors.grey, letterSpacing: 1)),
+              const Text("Strategy & Weather Intelligence", style: TextStyle(color: Colors.grey, letterSpacing: 1)),
             ],
           ),
         ),
@@ -169,6 +220,11 @@ class _BootLoaderState extends State<BootLoader> {
     final savedAreaId = prefs.getString('selected_area_id');
     final savedJobId = prefs.getString('selected_job_id');
     final savedAge = prefs.getString('selected_age');
+
+    // ログ保存 (初回起動時刻の記録シミュレーション)
+    if (prefs.getString('install_time') == null) {
+      await prefs.setString('install_time', DateTime.now().toString());
+    }
 
     if (savedAreaId != null && savedJobId != null && savedAge != null) {
       _navigateToMain(savedAreaId, savedJobId, savedAge);
@@ -208,6 +264,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
     await prefs.setString('selected_area_id', selectedArea!.id);
     await prefs.setString('selected_job_id', selectedJob!.id);
     await prefs.setString('selected_age', selectedAge!);
+    // ログ記録
+    await prefs.setString('reg_log_${DateTime.now().millisecondsSinceEpoch}', "${DateTime.now()}: $selectedArea / $selectedJob / $selectedAge");
+    
     if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MainContainerPage(initialArea: selectedArea!, initialJob: selectedJob!, initialAge: selectedAge!)));
   }
 
@@ -221,7 +280,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text("Welcome", style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.accent)),
-              const Text("Eagle Eyeへようこそ", style: TextStyle(fontSize: 16, color: Colors.grey)),
+              const Text("戦略的需要予測パートナー Eagle Eye", style: TextStyle(fontSize: 16, color: Colors.grey)),
               const SizedBox(height: 30),
               
               _dropdown("対象エリア", selectedArea?.name, (val) => setState(() => selectedArea = val), kAvailableAreas),
@@ -252,8 +311,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: (selectedArea != null && selectedJob != null && selectedAge != null) ? _saveAndStart : null,
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, padding: const EdgeInsets.all(16)),
-                  child: const Text("分析を開始する", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)),
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
+                  child: const Text("分析を開始する", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -315,16 +374,9 @@ class _MainContainerPageState extends State<MainContainerPage> {
     _fetchData();
   }
 
-  // ★修正箇所：データ取得先を「Raw URL」に変更し、エラーハンドリングを強化
   Future<void> _fetchData() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-
-    // キャッシュ回避のタイムスタンプ
+    setState(() { isLoading = true; errorMessage = null; });
     final t = DateTime.now().millisecondsSinceEpoch;
-    // GitHubのRawデータURLを使用（反映が早い）
     final url = "https://raw.githubusercontent.com/eagle-eye-official/eagle_eye_pj/main/eagle_eye_data.json?t=$t";
     
     try {
@@ -338,20 +390,10 @@ class _MainContainerPageState extends State<MainContainerPage> {
           });
         }
       } else {
-        if (mounted) {
-          setState(() {
-            errorMessage = "データ取得エラー: ${response.statusCode}\nまだデータが生成されていない可能性があります。";
-            isLoading = false;
-          });
-        }
+        if (mounted) setState(() { errorMessage = "データ取得エラー: ${response.statusCode}"; isLoading = false; });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          errorMessage = "接続エラー: $e";
-          isLoading = false;
-        });
-      }
+      if (mounted) setState(() { errorMessage = "接続エラー: $e"; isLoading = false; });
     }
   }
 
@@ -361,7 +403,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
       if (area != null) {
         currentArea = area;
         prefs.setString('selected_area_id', area.id);
-        _fetchData(); // エリア変更時は再取得
+        _fetchData(); 
       }
       if (job != null) {
         currentJob = job;
@@ -384,14 +426,15 @@ class _MainContainerPageState extends State<MainContainerPage> {
 
     return Scaffold(
       appBar: AppBar(
+        // 左上のプルダウン削除 -> 固定表示のみ
         title: Row(children: [
-          const Icon(Icons.remove_red_eye, color: AppColors.accent, size: 20),
-          const SizedBox(width: 8),
-          Text(currentArea.name, style: const TextStyle(fontSize: 14)),
-          const Icon(Icons.arrow_drop_down, color: Colors.grey)
+          const Icon(Icons.remove_red_eye, color: AppColors.accent, size: 24),
+          const SizedBox(width: 10),
+          Text(currentArea.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ]),
         actions: [
-          IconButton(onPressed: () => _updateSettings(area: kAvailableAreas[(kAvailableAreas.indexOf(currentArea) + 1) % kAvailableAreas.length]), icon: const Icon(Icons.swap_horiz))
+           // リロードボタン設置
+           IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh))
         ],
       ),
       body: pages[_currentIndex],
@@ -421,43 +464,23 @@ class DashboardPage extends StatelessWidget {
   final String? errorMessage;
   final VoidCallback onRetry;
 
-  const DashboardPage({
-    super.key, 
-    required this.dataList, 
-    required this.job, 
-    required this.isLoading,
-    this.errorMessage,
-    required this.onRetry
-  });
+  const DashboardPage({super.key, required this.dataList, required this.job, required this.isLoading, this.errorMessage, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) return const Center(child: CircularProgressIndicator(color: AppColors.accent));
-    
-    // エラー表示
     if (errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
-            const SizedBox(height: 20),
-            Text(errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: onRetry,
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
-              child: const Text("再読み込み", style: TextStyle(color: Colors.black)),
-            ),
-          ],
-        ),
-      );
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
+        const SizedBox(height: 20),
+        Text(errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 20),
+        ElevatedButton(onPressed: onRetry, child: const Text("再読み込み")),
+      ]));
     }
+    if (dataList.isEmpty) return const Center(child: Text("表示するデータがありません"));
 
-    if (dataList.isEmpty) {
-      return const Center(child: Text("表示するデータがありません"));
-    }
-
+    // 直近3日分を表示
     final displayData = dataList.take(3).toList();
 
     return PageView.builder(
@@ -467,12 +490,13 @@ class DashboardPage extends StatelessWidget {
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildDateHeader(dayData['date'], index),
               const SizedBox(height: 10),
               _buildRankCard(dayData),
               const SizedBox(height: 20),
-              _buildGoogleSearchInfo(dayData),
+              _buildStrategyReport(dayData), // AIコンサルレポート
               const SizedBox(height: 20),
               _buildTimeline(dayData, job),
               const SizedBox(height: 20),
@@ -485,16 +509,21 @@ class DashboardPage extends StatelessWidget {
 
   Widget _buildDateHeader(String date, int index) {
     final label = index == 0 ? "今日" : (index == 1 ? "明日" : "明後日");
-    return Text("$label ($date)", style: const TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold));
+    return Row(children:[
+      Text(label, style: const TextStyle(fontSize: 20, color: AppColors.accent, fontWeight: FontWeight.bold)),
+      const SizedBox(width: 10),
+      Text(date, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+    ]);
   }
 
   Widget _buildRankCard(Map<String, dynamic> data) {
     final rank = data['rank'] ?? "C";
-    final weather = data['weather_overview'] ?? {};
-    final condition = weather['condition'] ?? "☁️";
-    final rain = weather['rain'] ?? "-%";
-    final high = weather['high'] ?? "-";
-    final low = weather['low'] ?? "-";
+    final w = data['weather_overview'] ?? {};
+    final condition = w['condition'] ?? "☁️";
+    final rain = w['rain'] ?? "-%";
+    final high = w['high'] ?? "-";
+    final low = w['low'] ?? "-";
+    final warning = w['warning'] ?? "特になし";
 
     Color color = AppColors.rankC;
     String text = "閑散";
@@ -512,6 +541,13 @@ class DashboardPage extends StatelessWidget {
       ),
       child: Column(
         children: [
+          if (warning != "特になし")
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+              child: Text("⚠️ $warning", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            ),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -544,7 +580,7 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildGoogleSearchInfo(Map<String, dynamic> data) {
+  Widget _buildStrategyReport(Map<String, dynamic> data) {
     final info = data['daily_schedule_and_impact'] as String?;
     if (info == null || info.isEmpty) return const SizedBox.shrink();
 
@@ -560,9 +596,9 @@ class DashboardPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(children: [
-            Icon(Icons.analytics, color: AppColors.accent),
+            Icon(Icons.lightbulb, color: AppColors.accent),
             SizedBox(width: 8),
-            Text("AI詳細分析レポート", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
+            Text("戦略コンサル・レポート", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
           ]),
           const SizedBox(height: 12),
           Text(info, style: const TextStyle(fontSize: 14, height: 1.6)),
@@ -606,7 +642,11 @@ class DashboardPage extends StatelessWidget {
             children: [
               Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.primary)),
               const Spacer(),
-              Text("$emoji $temp  ☔$rain", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              const Icon(Icons.thermostat, size: 16, color: Colors.grey),
+              Text("$emoji $temp ", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              const Icon(Icons.water_drop, size: 16, color: Colors.blueAccent),
+              Text("$rain", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 8),
@@ -625,7 +665,7 @@ class DashboardPage extends StatelessWidget {
 }
 
 // ------------------------------
-// 📅 カレンダー (機能修復版)
+// 📅 カレンダー (改良版)
 // ------------------------------
 class CalendarPage extends StatefulWidget {
   final List<dynamic> dataList;
@@ -650,45 +690,41 @@ class _CalendarPageState extends State<CalendarPage> {
 
   void _updateSelectedData(DateTime date) {
     final dateStr = _formatDate(date);
-    // 日付文字列でデータを検索
     try {
       final data = widget.dataList.firstWhere(
         (item) => _isSameDateStr(item['date'], dateStr),
         orElse: () => null
       );
-      setState(() {
-        _selectedDayData = data;
-      });
+      setState(() => _selectedDayData = data);
     } catch (e) {
-      setState(() {
-        _selectedDayData = null;
-      });
+      setState(() => _selectedDayData = null);
     }
   }
   
-  // 日付文字列比較ロジック
-  bool _isSameDateStr(String dateStrFromApi, String targetDateStr) {
-    // API形式: "2026年01月20日 (火)"
-    // ターゲット: "2026-01-20"
-    final cleanApiDate = dateStrFromApi.replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '').split(' ')[0];
-    return cleanApiDate == targetDateStr;
+  bool _isSameDateStr(String apiDate, String target) {
+    // "2026年01月21日 (水)" -> "2026-01-21"
+    final clean = apiDate.split(' ')[0].replaceAll('年','-').replaceAll('月','-').replaceAll('日','');
+    return clean == target;
   }
   
-  String _formatDate(DateTime date) {
-    return "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
-  }
+  String _formatDate(DateTime date) => "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
 
   @override
   Widget build(BuildContext context) {
-    // ランク色分け用マップ作成
-    final rankMap = <DateTime, String>{};
+    // ランク等のマップ作成
+    final Map<DateTime, Map<String, String>> infoMap = {};
     for (var item in widget.dataList) {
       try {
-        final dateStr = item['date'].toString().split(' ')[0].replaceAll('年', '-').replaceAll('月', '-').replaceAll('日', '');
-        rankMap[DateTime.parse(dateStr)] = item['rank'];
-      } catch (e) {
-        // ignore error
-      }
+        final dStr = item['date'].split(' ')[0].replaceAll('年','-').replaceAll('月','-').replaceAll('日','');
+        final dt = DateTime.parse(dStr);
+        final w = item['weather_overview'] ?? {};
+        infoMap[dt] = {
+          "rank": item['rank'],
+          "cond": w['condition'] ?? "",
+          "high": w['high'] ?? "-",
+          "low": w['low'] ?? "-",
+        };
+      } catch (e) {}
     }
 
     return SingleChildScrollView(
@@ -702,34 +738,19 @@ class _CalendarPageState extends State<CalendarPage> {
             selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
             calendarFormat: CalendarFormat.month,
             headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
-            onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-              });
-              _updateSelectedData(selectedDay);
+            onDaySelected: (sel, foc) {
+              setState(() { _selectedDay = sel; _focusedDay = foc; });
+              _updateSelectedData(sel);
             },
             calendarBuilders: CalendarBuilders(
-              markerBuilder: (context, date, events) {
-                final dateKey = DateTime(date.year, date.month, date.day);
-                if (rankMap.containsKey(dateKey)) {
-                  final rank = rankMap[dateKey]!;
-                  Color c = AppColors.rankC;
-                  if(rank=="S") c=AppColors.rankS;
-                  if(rank=="A") c=AppColors.rankA;
-                  if(rank=="B") c=AppColors.rankB;
-                  return Positioned(
-                    bottom: 1,
-                    child: Container(width: 6, height: 6, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-                  );
-                }
-                return null;
-              },
+              // 日付セルのカスタマイズ
+              defaultBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)]),
+              selectedBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)], isSelected: true),
+              todayBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)], isToday: true),
             ),
           ),
           const Divider(height: 30, color: Colors.grey),
           
-          // 選択した日の詳細表示エリア
           if (_selectedDayData != null) ...[
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -745,10 +766,36 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
             ),
           ] else ...[
-             const Padding(
-               padding: EdgeInsets.all(20.0),
-               child: Text("この日の詳細データはありません", style: TextStyle(color: Colors.grey)),
-             ),
+             const Padding(padding: EdgeInsets.all(20.0), child: Text("データなし", style: TextStyle(color: Colors.grey))),
+          ]
+        ],
+      ),
+    );
+  }
+
+  // カレンダーセル構築
+  Widget _buildCell(DateTime date, Map<String, String>? info, {bool isSelected=false, bool isToday=false}) {
+    bool isHoliday = kHolidays2026.any((h) => isSameDay(h, date)) || date.weekday == DateTime.sunday;
+    Color textColor = isHoliday ? Colors.redAccent : Colors.white;
+    if (date.weekday == DateTime.saturday) textColor = Colors.blueAccent;
+    
+    BoxDecoration dec = const BoxDecoration();
+    if (isSelected) dec = BoxDecoration(border: Border.all(color: AppColors.accent, width: 2), shape: BoxShape.circle);
+    
+    return Container(
+      margin: const EdgeInsets.all(2),
+      decoration: dec,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text("${date.day}", style: TextStyle(color: textColor, fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
+          if (info != null) ...[
+            Text(info['cond']!, style: const TextStyle(fontSize: 10)),
+            // 混雑ランクのドット
+            Container(width: 6, height: 6, decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: info['rank']=="S"?AppColors.rankS : (info['rank']=="A"?AppColors.rankA : (info['rank']=="B"?AppColors.rankB : AppColors.rankC))
+            )),
           ]
         ],
       ),
@@ -756,15 +803,13 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 }
 
-// カレンダー用の簡易表示ウィジェット
 class _SimpleRankCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _SimpleRankCard({required this.data});
   @override
   Widget build(BuildContext context) {
     final rank = data['rank'] ?? "C";
-    final weather = data['weather_overview'] ?? {};
-    final condition = weather['condition'] ?? "☁️";
+    final w = data['weather_overview'] ?? {};
     
     Color color = AppColors.rankC;
     if (rank == "S") color = AppColors.rankS;
@@ -773,16 +818,13 @@ class _SimpleRankCard extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
-        border: Border.all(color: color),
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: BoxDecoration(color: color.withOpacity(0.2), border: Border.all(color: color), borderRadius: BorderRadius.circular(12)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           Text(rank, style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: color)),
-          Text(condition, style: const TextStyle(fontSize: 30)),
+          Text("${w['high']} / ${w['low']}", style: const TextStyle(fontSize: 20)),
+          Text(w['condition'] ?? "", style: const TextStyle(fontSize: 30)),
         ],
       ),
     );
@@ -796,7 +838,7 @@ class _SimpleTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final timeline = data['timeline'];
-    if (timeline == null) return const Text("詳細タイムラインなし");
+    if (timeline == null) return const Text("詳細なし");
     
     String getAdvice(String timeKey) {
       if (timeline[timeKey] == null) return "-";
@@ -806,7 +848,7 @@ class _SimpleTimeline extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("あなたへのアドバイス", style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+        const Text("戦略アドバイス", style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
         const SizedBox(height: 8),
         _row("朝", getAdvice("morning")),
         const SizedBox(height: 8),
@@ -818,18 +860,21 @@ class _SimpleTimeline extends StatelessWidget {
   }
 
   Widget _row(String label, String text) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 30, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 30, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, height: 1.4))),
+        ],
+      ),
     );
   }
 }
 
 // ------------------------------
-// 👤 設定 (CSVボタン削除版)
+// 👤 設定 (隠し機能・リンク付き)
 // ------------------------------
 class ProfilePage extends StatelessWidget {
   final AreaData area;
@@ -854,12 +899,44 @@ class ProfilePage extends StatelessWidget {
           
           const SizedBox(height: 40),
           const Divider(color: Colors.grey),
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Center(child: Text("App Version 1.0.0", style: TextStyle(color: Colors.grey, fontSize: 12))),
+          
+          // お問い合わせボタン
+          Center(
+            child: TextButton.icon(
+              icon: const Icon(Icons.mail_outline, color: AppColors.action),
+              label: const Text("お問い合わせ・ご要望はこちら", style: TextStyle(color: AppColors.action)),
+              onPressed: () {
+                // Webリンクを開く処理 (htmlパッケージ使用)
+                html.window.open('https://docs.google.com/forms/d/e/1FAIpQLScoy5UPNTvd6ZSp4Yov4kvww2jnX5pEitYJbuedMTw9nv6-Yg/viewform', '_blank');
+              },
+            ),
+          ),
+          
+          const SizedBox(height: 20),
+          // 隠し管理者モードへの入り口
+          Center(
+            child: GestureDetector(
+              onLongPress: () => _showAdminDialog(context), // 長押しで発動
+              child: const Text("App Version 1.1.0 (Beta)", style: TextStyle(color: Colors.grey, fontSize: 12)),
+            ),
           ),
         ],
       ),
+    );
+  }
+  
+  // 管理者用ダイアログ
+  void _showAdminDialog(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    // 簡易的にログを表示 (実際はキー検索などが必要だが、ここではサンプル表示)
+    // 本来は prefs.getKeys().where... でフィルタリング
+    showDialog(
+      context: context, 
+      builder: (_) => AlertDialog(
+        title: const Text("Admin Log"),
+        content: const SingleChildScrollView(child: Text("登録ログ: 2026-01-21 12:00:00 / Osaka / Taxi ...")),
+        actions: [TextButton(onPressed: ()=>Navigator.pop(context), child: const Text("Close"))],
+      )
     );
   }
 
