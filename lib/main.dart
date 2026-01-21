@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
-// web専用の機能を使うための条件付きインポート
-import 'dart:html' as html; 
+import 'dart:html' as html; // Webリンク用
 import 'package:http/http.dart' as http;
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -19,16 +18,13 @@ class AppColors {
   static const background = Color(0xFF0F172A); // 深いネイビーブラック
   static const cardBackground = Color(0xFF1E293B);
   static const primary = Color(0xFF3B82F6); // 鮮やかなブルー
-  static const accent = Color(0xFFF59E0B); // ゴールド（鷲の目）
-  static const action = Color(0xFFFF6D00); // エマージェンシーオレンジ（アクション用）
+  static const accent = Color(0xFFF59E0B); // ゴールド
+  static const action = Color(0xFFFF6D00); // エマージェンシーオレンジ
   
   static const rankS = Color(0xFFEF4444); // 赤
   static const rankA = Color(0xFFF97316); // オレンジ
   static const rankB = Color(0xFF3B82F6); // 青
   static const rankC = Color(0xFF10B981); // 緑
-  
-  static const textPrimary = Colors.white;
-  static const textSecondary = Colors.grey;
 }
 
 class JobData {
@@ -45,70 +41,46 @@ class AreaData {
   const AreaData(this.id, this.name);
 }
 
-// ★戦略的30地点定義 (Pythonと完全一致)
+// 戦略的30地点
 final List<AreaData> kAvailableAreas = [
-  // 北海道・東北
-  AreaData("hakodate", "北海道 函館"),
-  AreaData("sapporo", "北海道 札幌"),
-  AreaData("sendai", "宮城 仙台"),
-  // 東京・関東
-  AreaData("tokyo_marunouchi", "東京 丸の内・東京駅"),
-  AreaData("tokyo_ginza", "東京 銀座・新橋"),
-  AreaData("tokyo_shinjuku", "東京 新宿・歌舞伎町"),
-  AreaData("tokyo_shibuya", "東京 渋谷・原宿"),
-  AreaData("tokyo_roppongi", "東京 六本木・赤坂"),
-  AreaData("tokyo_ikebukuro", "東京 池袋"),
-  AreaData("tokyo_shinagawa", "東京 品川・高輪"),
-  AreaData("tokyo_ueno", "東京 上野"),
-  AreaData("tokyo_asakusa", "東京 浅草"),
-  AreaData("tokyo_akihabara", "東京 秋葉原・神田"),
-  AreaData("tokyo_omotesando", "東京 表参道・青山"),
-  AreaData("tokyo_ebisu", "東京 恵比寿・代官山"),
-  AreaData("tokyo_odaiba", "東京 お台場・有明"),
-  AreaData("tokyo_toyosu", "東京 豊洲・湾岸"),
-  AreaData("tokyo_haneda", "東京 羽田空港エリア"),
-  AreaData("chiba_maihama", "千葉 舞浜(ディズニー)"),
-  AreaData("kanagawa_yokohama", "神奈川 横浜"),
-  // 中部
-  AreaData("aichi_nagoya", "愛知 名古屋"),
-  // 関西
-  AreaData("osaka_kita", "大阪 キタ (梅田)"),
-  AreaData("osaka_minami", "大阪 ミナミ (難波)"),
-  AreaData("osaka_hokusetsu", "大阪 北摂"),
-  AreaData("osaka_bay", "大阪 ベイエリア(USJ)"),
-  AreaData("osaka_tennoji", "大阪 天王寺・阿倍野"),
-  AreaData("kyoto_shijo", "京都 四条河原町"),
-  AreaData("hyogo_kobe", "兵庫 神戸(三宮)"),
-  // 中国・九州・沖縄
-  AreaData("hiroshima", "広島"),
-  AreaData("fukuoka", "福岡 博多・中洲"),
-  AreaData("okinawa_naha", "沖縄 那覇"),
+  AreaData("hakodate", "北海道 函館"), AreaData("sapporo", "北海道 札幌"), AreaData("sendai", "宮城 仙台"),
+  AreaData("tokyo_marunouchi", "東京 丸の内"), AreaData("tokyo_ginza", "東京 銀座"), 
+  AreaData("tokyo_shinjuku", "東京 新宿"), AreaData("tokyo_shibuya", "東京 渋谷"), 
+  AreaData("tokyo_roppongi", "東京 六本木"), AreaData("tokyo_ikebukuro", "東京 池袋"),
+  AreaData("tokyo_shinagawa", "東京 品川"), AreaData("tokyo_ueno", "東京 上野"), 
+  AreaData("tokyo_asakusa", "東京 浅草"), AreaData("tokyo_akihabara", "東京 秋葉原"),
+  AreaData("tokyo_omotesando", "東京 表参道"), AreaData("tokyo_ebisu", "東京 恵比寿"), 
+  AreaData("tokyo_odaiba", "東京 お台場"), AreaData("tokyo_toyosu", "東京 豊洲"), 
+  AreaData("tokyo_haneda", "東京 羽田空港"), AreaData("chiba_maihama", "千葉 舞浜"), 
+  AreaData("kanagawa_yokohama", "神奈川 横浜"), AreaData("aichi_nagoya", "愛知 名古屋"),
+  AreaData("osaka_kita", "大阪 キタ"), AreaData("osaka_minami", "大阪 ミナミ"), 
+  AreaData("osaka_hokusetsu", "大阪 北摂"), AreaData("osaka_bay", "大阪 ベイエリア"), 
+  AreaData("osaka_tennoji", "大阪 天王寺"), AreaData("kyoto_shijo", "京都 四条"), 
+  AreaData("hyogo_kobe", "兵庫 神戸"), AreaData("hiroshima", "広島"), 
+  AreaData("fukuoka", "福岡 博多"), AreaData("okinawa_naha", "沖縄 那覇"),
 ];
 
-// 職業定義
 final List<JobData> kInitialJobList = [
-  JobData(id: "taxi", label: "タクシー運転手", icon: Icons.local_taxi, badgeColor: Colors.amber),
+  JobData(id: "taxi", label: "タクシー", icon: Icons.local_taxi, badgeColor: Colors.amber),
   JobData(id: "restaurant", label: "飲食店", icon: Icons.restaurant, badgeColor: Colors.redAccent),
-  JobData(id: "hotel", label: "ホテル・宿泊", icon: Icons.hotel, badgeColor: Colors.blue),
-  JobData(id: "shop", label: "小売・物販", icon: Icons.store, badgeColor: Colors.pink),
-  JobData(id: "logistics", label: "物流・配送", icon: Icons.local_shipping, badgeColor: Colors.teal),
+  JobData(id: "hotel", label: "ホテル", icon: Icons.hotel, badgeColor: Colors.blue),
+  JobData(id: "shop", label: "小売", icon: Icons.store, badgeColor: Colors.pink),
+  JobData(id: "logistics", label: "物流", icon: Icons.local_shipping, badgeColor: Colors.teal),
   JobData(id: "conveni", label: "コンビニ", icon: Icons.local_convenience_store, badgeColor: Colors.orange),
-  JobData(id: "construction", label: "建設・現場", icon: Icons.construction, badgeColor: Colors.brown),
+  JobData(id: "construction", label: "建設", icon: Icons.construction, badgeColor: Colors.brown),
   JobData(id: "delivery", label: "デリバリー", icon: Icons.delivery_dining, badgeColor: Colors.green),
-  JobData(id: "security", label: "イベント・警備", icon: Icons.security, badgeColor: Colors.indigo),
+  JobData(id: "security", label: "警備", icon: Icons.security, badgeColor: Colors.indigo),
 ];
 
 final List<String> kAgeGroups = ["10代", "20代", "30代", "40代", "50代", "60代以上"];
 
-// 2026年の祝日リスト (簡易版)
+// 2026年祝日リスト
 final Set<DateTime> kHolidays2026 = {
-  DateTime(2026, 1, 1), DateTime(2026, 1, 12), DateTime(2026, 2, 11),
-  DateTime(2026, 2, 23), DateTime(2026, 3, 20), DateTime(2026, 4, 29),
-  DateTime(2026, 5, 3), DateTime(2026, 5, 4), DateTime(2026, 5, 5),
-  DateTime(2026, 5, 6), DateTime(2026, 7, 20), DateTime(2026, 8, 11),
-  DateTime(2026, 9, 21), DateTime(2026, 9, 22), DateTime(2026, 9, 23),
-  DateTime(2026, 10, 12), DateTime(2026, 11, 3), DateTime(2026, 11, 23),
-  DateTime(2026, 11, 24),
+  DateTime(2026,1,1), DateTime(2026,1,12), DateTime(2026,2,11), DateTime(2026,2,23),
+  DateTime(2026,3,20), DateTime(2026,4,29), DateTime(2026,5,3), DateTime(2026,5,4),
+  DateTime(2026,5,5), DateTime(2026,5,6), DateTime(2026,7,20), DateTime(2026,8,11),
+  DateTime(2026,9,21), DateTime(2026,9,22), DateTime(2026,9,23), DateTime(2026,10,12),
+  DateTime(2026,11,3), DateTime(2026,11,23), DateTime(2026,11,24),
 };
 
 // --- アプリ本体 ---
@@ -123,21 +95,14 @@ class EagleEyeApp extends StatelessWidget {
         scaffoldBackgroundColor: AppColors.background,
         colorScheme: const ColorScheme.dark(primary: AppColors.primary, surface: AppColors.cardBackground, secondary: AppColors.action),
         appBarTheme: const AppBarTheme(backgroundColor: AppColors.background, elevation: 0),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.action, // アクションカラー適用
-            foregroundColor: Colors.white,
-          ),
-        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(backgroundColor: AppColors.action, foregroundColor: Colors.white)),
       ),
       home: const SplashPage(),
     );
   }
 }
 
-// ------------------------------
-// 🦅 スプラッシュ画面
-// ------------------------------
+// --- スプラッシュ画面 ---
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
   @override
@@ -151,20 +116,13 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(duration: const Duration(seconds: 1), vsync: this); // 高速化
+    _controller = AnimationController(duration: const Duration(seconds: 1), vsync: this);
     _opacity = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
     _controller.forward();
     
-    // 待機時間を1.5秒に短縮 (体感速度向上)
-    Future.delayed(const Duration(milliseconds: 1500), () {
+    Future.delayed(const Duration(seconds: 2), () {
       if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const BootLoader()));
     });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   @override
@@ -177,17 +135,17 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ロゴ画像表示
+              // ロゴ画像 (assets/image.png)
               Container(
-                width: 200, height: 200,
+                width: 180, height: 180,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.accent, width: 4),
-                  boxShadow: [BoxShadow(color: AppColors.accent.withOpacity(0.5), blurRadius: 30)],
+                  border: Border.all(color: AppColors.accent, width: 3),
+                  boxShadow: [BoxShadow(color: AppColors.accent.withOpacity(0.4), blurRadius: 20)],
                   image: const DecorationImage(image: AssetImage('assets/image.png'), fit: BoxFit.cover),
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
               const Text("EAGLE EYE", style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4, color: AppColors.accent)),
               const SizedBox(height: 10),
               const Text("Strategy & Weather Intelligence", style: TextStyle(color: Colors.grey, letterSpacing: 1)),
@@ -199,9 +157,7 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
   }
 }
 
-// ------------------------------
-// 🚀 起動チェック
-// ------------------------------
+// --- 起動チェック ---
 class BootLoader extends StatefulWidget {
   const BootLoader({super.key});
   @override
@@ -217,17 +173,12 @@ class _BootLoaderState extends State<BootLoader> {
 
   Future<void> _checkFirstRun() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedAreaId = prefs.getString('selected_area_id');
-    final savedJobId = prefs.getString('selected_job_id');
-    final savedAge = prefs.getString('selected_age');
-
-    // ログ保存 (初回起動時刻の記録シミュレーション)
-    if (prefs.getString('install_time') == null) {
-      await prefs.setString('install_time', DateTime.now().toString());
-    }
-
-    if (savedAreaId != null && savedJobId != null && savedAge != null) {
-      _navigateToMain(savedAreaId, savedJobId, savedAge);
+    if (prefs.getString('selected_area_id') != null) {
+      _navigateToMain(
+        prefs.getString('selected_area_id')!,
+        prefs.getString('selected_job_id')!,
+        prefs.getString('selected_age')!
+      );
     } else {
       if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const OnboardingPage()));
     }
@@ -245,9 +196,7 @@ class _BootLoaderState extends State<BootLoader> {
   }
 }
 
-// ------------------------------
-// 🔰 オンボーディング
-// ------------------------------
+// --- オンボーディング ---
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
   @override
@@ -265,7 +214,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
     await prefs.setString('selected_job_id', selectedJob!.id);
     await prefs.setString('selected_age', selectedAge!);
     // ログ記録
-    await prefs.setString('reg_log_${DateTime.now().millisecondsSinceEpoch}', "${DateTime.now()}: $selectedArea / $selectedJob / $selectedAge");
+    String log = "${DateTime.now()}: Reg ${selectedArea!.name} / ${selectedJob!.label}";
+    await prefs.setString('admin_log_${DateTime.now().millisecondsSinceEpoch}', log);
     
     if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MainContainerPage(initialArea: selectedArea!, initialJob: selectedJob!, initialAge: selectedAge!)));
   }
@@ -280,7 +230,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text("Welcome", style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.accent)),
-              const Text("戦略的需要予測パートナー Eagle Eye", style: TextStyle(fontSize: 16, color: Colors.grey)),
+              const Text("Eagle Eyeへようこそ", style: TextStyle(fontSize: 16, color: Colors.grey)),
               const SizedBox(height: 30),
               
               _dropdown("対象エリア", selectedArea?.name, (val) => setState(() => selectedArea = val), kAvailableAreas),
@@ -305,7 +255,6 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   );
                 }).toList(),
               ),
-
               const SizedBox(height: 40),
               SizedBox(
                 width: double.infinity,
@@ -343,9 +292,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 }
 
-// ------------------------------
-// 📱 メインコンテナ
-// ------------------------------
+// --- メインコンテナ ---
 class MainContainerPage extends StatefulWidget {
   final AreaData initialArea;
   final JobData initialJob;
@@ -426,14 +373,12 @@ class _MainContainerPageState extends State<MainContainerPage> {
 
     return Scaffold(
       appBar: AppBar(
-        // 左上のプルダウン削除 -> 固定表示のみ
         title: Row(children: [
-          const Icon(Icons.remove_red_eye, color: AppColors.accent, size: 24),
-          const SizedBox(width: 10),
+          const Icon(Icons.location_on, color: AppColors.action, size: 20),
+          const SizedBox(width: 8),
           Text(currentArea.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ]),
         actions: [
-           // リロードボタン設置
            IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh))
         ],
       ),
@@ -454,9 +399,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
   }
 }
 
-// ------------------------------
-// 📊 ダッシュボード (Home)
-// ------------------------------
+// --- ダッシュボード ---
 class DashboardPage extends StatelessWidget {
   final List<dynamic> dataList;
   final JobData job;
@@ -473,14 +416,14 @@ class DashboardPage extends StatelessWidget {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
         const SizedBox(height: 20),
-        Text(errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+        Text(errorMessage!, style: const TextStyle(color: Colors.grey)),
         const SizedBox(height: 20),
         ElevatedButton(onPressed: onRetry, child: const Text("再読み込み")),
       ]));
     }
-    if (dataList.isEmpty) return const Center(child: Text("表示するデータがありません"));
+    if (dataList.isEmpty) return const Center(child: Text("データがありません"));
 
-    // 直近3日分を表示
+    // 3日分表示
     final displayData = dataList.take(3).toList();
 
     return PageView.builder(
@@ -496,9 +439,13 @@ class DashboardPage extends StatelessWidget {
               const SizedBox(height: 10),
               _buildRankCard(dayData),
               const SizedBox(height: 20),
-              _buildStrategyReport(dayData), // AIコンサルレポート
-              const SizedBox(height: 20),
+              
+              // ★配置変更: 時間ごとの天気＆アドバイスを先に表示
               _buildTimeline(dayData, job),
+              const SizedBox(height: 20),
+              
+              // ★タイトル変更: 日付入り動的タイトル
+              _buildStrategyReport(dayData),
               const SizedBox(height: 20),
             ],
           ),
@@ -510,9 +457,13 @@ class DashboardPage extends StatelessWidget {
   Widget _buildDateHeader(String date, int index) {
     final label = index == 0 ? "今日" : (index == 1 ? "明日" : "明後日");
     return Row(children:[
-      Text(label, style: const TextStyle(fontSize: 20, color: AppColors.accent, fontWeight: FontWeight.bold)),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(4)),
+        child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+      ),
       const SizedBox(width: 10),
-      Text(date, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+      Text(date, style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
     ]);
   }
 
@@ -565,6 +516,7 @@ class DashboardPage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
+              // 気象庁データ表示
               Column(children: [
                 const Icon(Icons.thermostat, color: Colors.white, size: 28),
                 Text("$high / $low", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -580,33 +532,6 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildStrategyReport(Map<String, dynamic> data) {
-    final info = data['daily_schedule_and_impact'] as String?;
-    if (info == null || info.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.accent.withOpacity(0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(children: [
-            Icon(Icons.lightbulb, color: AppColors.accent),
-            SizedBox(width: 8),
-            Text("戦略コンサル・レポート", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
-          ]),
-          const SizedBox(height: 12),
-          Text(info, style: const TextStyle(fontSize: 14, height: 1.6)),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTimeline(Map<String, dynamic> data, JobData job) {
     final timeline = data['timeline'];
     if (timeline == null) return const SizedBox.shrink();
@@ -616,9 +541,9 @@ class DashboardPage extends StatelessWidget {
       children: [
         const Text("時間ごとの天気 & アドバイス", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
-        _timeSlot("朝 (05-11)", timeline['morning'], job),
-        _timeSlot("昼 (11-16)", timeline['daytime'], job),
-        _timeSlot("夜 (16-24)", timeline['night'], job),
+        _timeSlot("朝 (06-12)", timeline['morning'], job),
+        _timeSlot("昼 (12-18)", timeline['daytime'], job),
+        _timeSlot("夜 (18-24)", timeline['night'], job),
       ],
     );
   }
@@ -642,11 +567,14 @@ class DashboardPage extends StatelessWidget {
             children: [
               Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.primary)),
               const Spacer(),
+              // ★修正: 天気アイコン -> 温度計の順序
+              Text(emoji, style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
               const Icon(Icons.thermostat, size: 16, color: Colors.grey),
-              Text("$emoji $temp ", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              Text(temp, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               const SizedBox(width: 8),
               const Icon(Icons.water_drop, size: 16, color: Colors.blueAccent),
-              Text("$rain", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              Text(rain, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 8),
@@ -662,11 +590,45 @@ class DashboardPage extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildStrategyReport(Map<String, dynamic> data) {
+    final info = data['daily_schedule_and_impact'] as String?;
+    // 日付を抽出してタイトル化 (例: "1月22日のレポート")
+    final dateRaw = data['date'].toString();
+    final dateClean = dateRaw.split(' ')[0].replaceAll(RegExp(r'\d{4}年'), ''); // 年を削除
+    final title = "$dateCleanのレポート";
+
+    if (info == null || info.isEmpty) return const SizedBox.shrink();
+
+    // AIテキスト内の重複タイトルを除去
+    final cleanInfo = info.replaceAll(RegExp(r'【.*レポート】'), '').trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.accent.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.lightbulb, color: AppColors.accent),
+            const SizedBox(width: 8),
+            // ★修正: 動的タイトル
+            Text(title, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
+          ]),
+          const SizedBox(height: 12),
+          Text(cleanInfo, style: const TextStyle(fontSize: 14, height: 1.6)),
+        ],
+      ),
+    );
+  }
 }
 
-// ------------------------------
-// 📅 カレンダー (改良版)
-// ------------------------------
+// --- カレンダー ---
 class CalendarPage extends StatefulWidget {
   final List<dynamic> dataList;
   final JobData job;
@@ -702,16 +664,13 @@ class _CalendarPageState extends State<CalendarPage> {
   }
   
   bool _isSameDateStr(String apiDate, String target) {
-    // "2026年01月21日 (水)" -> "2026-01-21"
     final clean = apiDate.split(' ')[0].replaceAll('年','-').replaceAll('月','-').replaceAll('日','');
     return clean == target;
   }
-  
   String _formatDate(DateTime date) => "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
 
   @override
   Widget build(BuildContext context) {
-    // ランク等のマップ作成
     final Map<DateTime, Map<String, String>> infoMap = {};
     for (var item in widget.dataList) {
       try {
@@ -743,14 +702,12 @@ class _CalendarPageState extends State<CalendarPage> {
               _updateSelectedData(sel);
             },
             calendarBuilders: CalendarBuilders(
-              // 日付セルのカスタマイズ
               defaultBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)]),
               selectedBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)], isSelected: true),
               todayBuilder: (context, date, _) => _buildCell(date, infoMap[DateTime(date.year, date.month, date.day)], isToday: true),
             ),
           ),
           const Divider(height: 30, color: Colors.grey),
-          
           if (_selectedDayData != null) ...[
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -773,11 +730,11 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  // カレンダーセル構築
   Widget _buildCell(DateTime date, Map<String, String>? info, {bool isSelected=false, bool isToday=false}) {
+    // 祝日または日曜は赤
     bool isHoliday = kHolidays2026.any((h) => isSameDay(h, date)) || date.weekday == DateTime.sunday;
     Color textColor = isHoliday ? Colors.redAccent : Colors.white;
-    if (date.weekday == DateTime.saturday) textColor = Colors.blueAccent;
+    if (!isHoliday && date.weekday == DateTime.saturday) textColor = Colors.blueAccent;
     
     BoxDecoration dec = const BoxDecoration();
     if (isSelected) dec = BoxDecoration(border: Border.all(color: AppColors.accent, width: 2), shape: BoxShape.circle);
@@ -791,7 +748,7 @@ class _CalendarPageState extends State<CalendarPage> {
           Text("${date.day}", style: TextStyle(color: textColor, fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
           if (info != null) ...[
             Text(info['cond']!, style: const TextStyle(fontSize: 10)),
-            // 混雑ランクのドット
+            // 混雑ランクドット
             Container(width: 6, height: 6, decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: info['rank']=="S"?AppColors.rankS : (info['rank']=="A"?AppColors.rankA : (info['rank']=="B"?AppColors.rankB : AppColors.rankC))
@@ -823,8 +780,10 @@ class _SimpleRankCard extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           Text(rank, style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: color)),
-          Text("${w['high']} / ${w['low']}", style: const TextStyle(fontSize: 20)),
-          Text(w['condition'] ?? "", style: const TextStyle(fontSize: 30)),
+          Column(children: [
+            Text("${w['high']} / ${w['low']}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(w['condition'] ?? "", style: const TextStyle(fontSize: 24)),
+          ]),
         ],
       ),
     );
@@ -848,7 +807,7 @@ class _SimpleTimeline extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("戦略アドバイス", style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+        const Text("アドバイス", style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
         const SizedBox(height: 8),
         _row("朝", getAdvice("morning")),
         const SizedBox(height: 8),
@@ -873,9 +832,7 @@ class _SimpleTimeline extends StatelessWidget {
   }
 }
 
-// ------------------------------
-// 👤 設定 (隠し機能・リンク付き)
-// ------------------------------
+// --- 設定 ---
 class ProfilePage extends StatelessWidget {
   final AreaData area;
   final JobData job;
@@ -900,24 +857,27 @@ class ProfilePage extends StatelessWidget {
           const SizedBox(height: 40),
           const Divider(color: Colors.grey),
           
-          // お問い合わせボタン
+          // お問い合わせボタン (Googleフォーム)
           Center(
-            child: TextButton.icon(
-              icon: const Icon(Icons.mail_outline, color: AppColors.action),
-              label: const Text("お問い合わせ・ご要望はこちら", style: TextStyle(color: AppColors.action)),
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.mail_outline),
+              label: const Text("お問い合わせ・ご要望はこちら"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.action,
+                minimumSize: const Size(double.infinity, 50)
+              ),
               onPressed: () {
-                // Webリンクを開く処理 (htmlパッケージ使用)
                 html.window.open('https://docs.google.com/forms/d/e/1FAIpQLScoy5UPNTvd6ZSp4Yov4kvww2jnX5pEitYJbuedMTw9nv6-Yg/viewform', '_blank');
               },
             ),
           ),
           
           const SizedBox(height: 20),
-          // 隠し管理者モードへの入り口
+          // 管理者用隠しボタン
           Center(
             child: GestureDetector(
-              onLongPress: () => _showAdminDialog(context), // 長押しで発動
-              child: const Text("App Version 1.1.0 (Beta)", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              onLongPress: () => _showAdminDialog(context),
+              child: const Text("App Version 2.0.0", style: TextStyle(color: Colors.grey, fontSize: 12)),
             ),
           ),
         ],
@@ -925,16 +885,17 @@ class ProfilePage extends StatelessWidget {
     );
   }
   
-  // 管理者用ダイアログ
   void _showAdminDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    // 簡易的にログを表示 (実際はキー検索などが必要だが、ここではサンプル表示)
-    // 本来は prefs.getKeys().where... でフィルタリング
+    final keys = prefs.getKeys().where((k) => k.startsWith('admin_log_'));
+    String logText = "";
+    for(var k in keys) { logText += "${prefs.getString(k)}\n"; }
+    
     showDialog(
       context: context, 
       builder: (_) => AlertDialog(
-        title: const Text("Admin Log"),
-        content: const SingleChildScrollView(child: Text("登録ログ: 2026-01-21 12:00:00 / Osaka / Taxi ...")),
+        title: const Text("Admin Logs"),
+        content: SingleChildScrollView(child: Text(logText.isEmpty ? "No logs" : logText)),
         actions: [TextButton(onPressed: ()=>Navigator.pop(context), child: const Text("Close"))],
       )
     );
