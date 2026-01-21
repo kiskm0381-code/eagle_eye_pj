@@ -12,45 +12,44 @@ import google.generativeai as genai
 API_KEY = os.environ.get("GEMINI_API_KEY")
 JST = timezone(timedelta(hours=9), 'JST')
 
-# --- 戦略的30地点定義 (JMAコード修正版) ---
-# エラーが出た地点のコードを修正 (一次細分区域コードを使用)
+# --- 戦略的30地点定義 (JMAコード 修正版: XX0000形式に統一) ---
 TARGET_AREAS = {
     # --- 北海道・東北 ---
     "hakodate": { "name": "北海道 函館", "jma_code": "014100", "feature": "観光・夜景・海鮮。冬は雪の影響大。クルーズ船寄港地。" },
-    "sapporo": { "name": "北海道 札幌", "jma_code": "016010", "feature": "北日本最大の歓楽街ススキノ。雪まつり等のイベント。" }, # 修正
-    "sendai": { "name": "宮城 仙台", "jma_code": "040010", "feature": "東北のビジネス拠点。国分町の夜間需要。" }, # 修正
-    # --- 東京・関東 ---
-    "tokyo_marunouchi": { "name": "東京 丸の内・東京駅", "jma_code": "130010", "feature": "日本のビジネス中心地。出張・接待・富裕層需要。" },
-    "tokyo_ginza": { "name": "東京 銀座・新橋", "jma_code": "130010", "feature": "夜の接待需要とサラリーマンの聖地。高級店多し。" },
-    "tokyo_shinjuku": { "name": "東京 新宿・歌舞伎町", "jma_code": "130010", "feature": "世界一の乗降客数と眠らない街。タクシー需要最強。" },
-    "tokyo_shibuya": { "name": "東京 渋谷・原宿", "jma_code": "130010", "feature": "若者とインバウンド、IT企業の街。トレンド発信地。" },
-    "tokyo_roppongi": { "name": "東京 六本木・赤坂", "jma_code": "130010", "feature": "富裕層、外国人、メディア関係者の夜の移動。" },
-    "tokyo_ikebukuro": { "name": "東京 池袋", "jma_code": "130010", "feature": "埼玉方面への玄関口、サブカルチャー。" },
-    "tokyo_shinagawa": { "name": "東京 品川・高輪", "jma_code": "130010", "feature": "リニア・新幹線拠点。ホテルとビジネス需要。" },
-    "tokyo_ueno": { "name": "東京 上野", "jma_code": "130010", "feature": "北の玄関口、美術館、アメ横。観光客多し。" },
-    "tokyo_asakusa": { "name": "東京 浅草", "jma_code": "130010", "feature": "インバウンド観光の絶対王者。人力車や食べ歩き。" },
-    "tokyo_akihabara": { "name": "東京 秋葉原・神田", "jma_code": "130010", "feature": "オタク文化とビジネスの融合。電気街。" },
-    "tokyo_omotesando": { "name": "東京 表参道・青山", "jma_code": "130010", "feature": "ファッション、富裕層のランチ・買い物需要。" },
-    "tokyo_ebisu": { "name": "東京 恵比寿・代官山", "jma_code": "130010", "feature": "オシャレな飲食需要、タクシー利用率高め。" },
-    "tokyo_odaiba": { "name": "東京 お台場・有明", "jma_code": "130010", "feature": "ビッグサイトのイベント、観光、デートスポット。" },
-    "tokyo_toyosu": { "name": "東京 豊洲・湾岸", "jma_code": "130010", "feature": "タワマン住民の生活需要と市場関係。" },
-    "tokyo_haneda": { "name": "東京 羽田空港エリア", "jma_code": "130010", "feature": "旅行・出張客の送迎需要。天候による遅延影響。" },
-    "chiba_maihama": { "name": "千葉 舞浜(ディズニー)", "jma_code": "120010", "feature": "ディズニーリゾート。イベントと天候への依存度極大。" },
-    "kanagawa_yokohama": { "name": "神奈川 横浜", "jma_code": "140010", "feature": "みなとみらい観光とビジネスが融合。中華街。" },
+    "sapporo": { "name": "北海道 札幌", "jma_code": "016000", "feature": "北日本最大の歓楽街ススキノ。雪まつり等のイベント。" },
+    "sendai": { "name": "宮城 仙台", "jma_code": "040000", "feature": "東北のビジネス拠点。国分町の夜間需要。" },
+    # --- 東京・関東 (すべて東京130000等で取得) ---
+    "tokyo_marunouchi": { "name": "東京 丸の内・東京駅", "jma_code": "130000", "feature": "日本のビジネス中心地。出張・接待・富裕層需要。" },
+    "tokyo_ginza": { "name": "東京 銀座・新橋", "jma_code": "130000", "feature": "夜の接待需要とサラリーマンの聖地。高級店多し。" },
+    "tokyo_shinjuku": { "name": "東京 新宿・歌舞伎町", "jma_code": "130000", "feature": "世界一の乗降客数と眠らない街。タクシー需要最強。" },
+    "tokyo_shibuya": { "name": "東京 渋谷・原宿", "jma_code": "130000", "feature": "若者とインバウンド、IT企業の街。トレンド発信地。" },
+    "tokyo_roppongi": { "name": "東京 六本木・赤坂", "jma_code": "130000", "feature": "富裕層、外国人、メディア関係者の夜の移動。" },
+    "tokyo_ikebukuro": { "name": "東京 池袋", "jma_code": "130000", "feature": "埼玉方面への玄関口、サブカルチャー。" },
+    "tokyo_shinagawa": { "name": "東京 品川・高輪", "jma_code": "130000", "feature": "リニア・新幹線拠点。ホテルとビジネス需要。" },
+    "tokyo_ueno": { "name": "東京 上野", "jma_code": "130000", "feature": "北の玄関口、美術館、アメ横。観光客多し。" },
+    "tokyo_asakusa": { "name": "東京 浅草", "jma_code": "130000", "feature": "インバウンド観光の絶対王者。人力車や食べ歩き。" },
+    "tokyo_akihabara": { "name": "東京 秋葉原・神田", "jma_code": "130000", "feature": "オタク文化とビジネスの融合。電気街。" },
+    "tokyo_omotesando": { "name": "東京 表参道・青山", "jma_code": "130000", "feature": "ファッション、富裕層のランチ・買い物需要。" },
+    "tokyo_ebisu": { "name": "東京 恵比寿・代官山", "jma_code": "130000", "feature": "オシャレな飲食需要、タクシー利用率高め。" },
+    "tokyo_odaiba": { "name": "東京 お台場・有明", "jma_code": "130000", "feature": "ビッグサイトのイベント、観光、デートスポット。" },
+    "tokyo_toyosu": { "name": "東京 豊洲・湾岸", "jma_code": "130000", "feature": "タワマン住民の生活需要と市場関係。" },
+    "tokyo_haneda": { "name": "東京 羽田空港エリア", "jma_code": "130000", "feature": "旅行・出張客の送迎需要。天候による遅延影響。" },
+    "chiba_maihama": { "name": "千葉 舞浜(ディズニー)", "jma_code": "120000", "feature": "ディズニーリゾート。イベントと天候への依存度極大。" },
+    "kanagawa_yokohama": { "name": "神奈川 横浜", "jma_code": "140000", "feature": "みなとみらい観光とビジネスが融合。中華街。" },
     # --- 中部 ---
-    "aichi_nagoya": { "name": "愛知 名古屋", "jma_code": "230010", "feature": "トヨタ系ビジネスと独自の飲食文化。車社会。" },
+    "aichi_nagoya": { "name": "愛知 名古屋", "jma_code": "230000", "feature": "トヨタ系ビジネスと独自の飲食文化。車社会。" },
     # --- 関西 ---
     "osaka_kita": { "name": "大阪 キタ (梅田)", "jma_code": "270000", "feature": "西日本最大のビジネス街兼繁華街。地下街発達。" },
     "osaka_minami": { "name": "大阪 ミナミ (難波)", "jma_code": "270000", "feature": "インバウンド人気No.1。食い倒れの街。" },
     "osaka_hokusetsu": { "name": "大阪 北摂", "jma_code": "270000", "feature": "伊丹空港/新幹線・ビジネス・高級住宅街。" },
     "osaka_bay": { "name": "大阪 ベイエリア(USJ)", "jma_code": "270000", "feature": "USJや海遊館。海風強くイベント依存度高い。" },
     "osaka_tennoji": { "name": "大阪 天王寺・阿倍野", "jma_code": "270000", "feature": "ハルカス/通天閣。新旧文化の融合。" },
-    "kyoto_shijo": { "name": "京都 四条河原町", "jma_code": "260010", "feature": "世界最強の観光都市。インバウンド需要が桁違い。" },
-    "hyogo_kobe": { "name": "兵庫 神戸(三宮)", "jma_code": "280010", "feature": "オシャレな港町。観光とビジネス。" },
+    "kyoto_shijo": { "name": "京都 四条河原町", "jma_code": "260000", "feature": "世界最強の観光都市。インバウンド需要が桁違い。" },
+    "hyogo_kobe": { "name": "兵庫 神戸(三宮)", "jma_code": "280000", "feature": "オシャレな港町。観光とビジネス。" },
     # --- 中国・九州・沖縄 ---
-    "hiroshima": { "name": "広島", "jma_code": "340010", "feature": "平和公園・宮島。欧米系インバウンド多い。" },
-    "fukuoka": { "name": "福岡 博多・中洲", "jma_code": "400010", "feature": "アジアの玄関口。屋台文化など夜の需要が強い。" },
-    "okinawa_naha": { "name": "沖縄 那覇", "jma_code": "471010", "feature": "国際通り。観光客メイン。台風等の天候影響大。" },
+    "hiroshima": { "name": "広島", "jma_code": "340000", "feature": "平和公園・宮島。欧米系インバウンド多い。" },
+    "fukuoka": { "name": "福岡 博多・中洲", "jma_code": "400000", "feature": "アジアの玄関口。屋台文化など夜の需要が強い。" },
+    "okinawa_naha": { "name": "沖縄 那覇", "jma_code": "471000", "feature": "国際通り。観光客メイン。台風等の天候影響大。" },
 }
 
 # --- JMA API 取得・解析 ---
@@ -66,10 +65,6 @@ def get_jma_forecast(area_code):
         with urllib.request.urlopen(forecast_url, timeout=15) as res:
             data = json.loads(res.read().decode('utf-8'))
             
-            # データ構造チェック (場所によって構造が違う場合があるため)
-            if not data or "timeSeries" not in data[0]:
-                raise ValueError("Unexpected JSON structure")
-
             weather_series = data[0]["timeSeries"][0]
             rain_series = data[0]["timeSeries"][1]
             temp_series = data[0]["timeSeries"][2]
@@ -91,6 +86,7 @@ def get_jma_forecast(area_code):
             ]
     except Exception as e:
         print(f"JMA Forecast Error ({area_code}): {e}")
+        # エラー時はダミーデータ
         result["forecasts"] = [{"code": "200", "rain_am": "-", "rain_pm": "-", "high": "-", "low": "-"}]
 
     # 2. 警報・注意報の取得
@@ -99,10 +95,7 @@ def get_jma_forecast(area_code):
             w_data = json.loads(res.read().decode('utf-8'))
             if "headlineText" in w_data and w_data["headlineText"]:
                  result["warning"] = w_data["headlineText"]
-            else:
-                 result["warning"] = "特になし"
-    except Exception as e:
-        # print(f"JMA Warning Error ({area_code}): {e}") # ログ抑制
+    except:
         pass
 
     return result
@@ -128,30 +121,7 @@ def extract_json_block(text):
     except:
         return text
 
-# --- モデル選択 (Google検索仕様修正版) ---
-def get_model():
-    genai.configure(api_key=API_KEY)
-    
-    # ★修正ポイント: ツールの指定方法を修正
-    tools = [
-        {"google_search": {}} 
-    ]
-    
-    # ★修正ポイント: generation_configからresponse_mime_typeを削除し、
-    #  プロンプトでJSON出力を強く指示する方式に戻す (ツールの相性問題回避)
-    generation_config = {
-        "temperature": 0.7,
-    }
-    
-    target_model = "models/gemini-2.5-flash" # 最新モデル指定
-    try:
-        # tools引数を正しく渡す
-        return genai.GenerativeModel(target_model, tools=tools, generation_config=generation_config)
-    except:
-        # Fallback
-        return genai.GenerativeModel('models/gemini-1.5-flash', tools=tools, generation_config=generation_config)
-
-# --- AI生成 (検索＆コンサル) ---
+# --- モデル生成 (安全装置付き) ---
 def get_ai_advice(area_key, area_data, target_date, jma_data):
     if not API_KEY: return None
 
@@ -167,15 +137,14 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
     rain_am = forecast.get("rain_am", "-")
     rain_pm = forecast.get("rain_pm", "-")
     warning_text = jma_data.get("warning", "特になし")
-    
     rain_display = f"午前{rain_am}% / 午後{rain_pm}%"
 
-    print(f"🤖 [AI検索＆コンサル] {area_data['name']} / {full_date} ...", flush=True)
+    print(f"🤖 [AI生成] {area_data['name']} / {full_date} ...", flush=True)
 
-    # プロンプト (JSON出力を強く指示)
-    prompt = f"""
+    # プロンプト共通部分
+    base_prompt = f"""
     あなたは世界屈指の戦略経営コンサルタントです。
-    Google検索ツールを使って、以下のエリアの最新イベントや動向を検索し、ファクトに基づいた戦略を提案してください。
+    以下のエリアの社会的動向（イベント、インバウンド、天候）を考慮し、ファクトに基づいた戦略を提案してください。
 
     【ターゲット】
     エリア: {area_data['name']} ({area_data['feature']})
@@ -185,14 +154,13 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
     天気: {w_emoji}, 気温: 最高{high_temp}℃/最低{low_temp}℃, 降水: {rain_display}, 警報: {warning_text}
 
     【重要指令】
-    1. **Google検索を実行せよ:** "{area_data['name']} イベント {date_str}", "{area_data['name']} 混雑予想" などを検索し、イベント名や動向を特定せよ。
-    2. **挨拶不要:** いきなり分析結果から書け。
-    3. **レポート構成:**
+    1. **挨拶不要:** いきなり分析結果から書け。
+    2. **レポート構成:**
        - タイトル: 「{date_display}のレポート」
        - 結論: 1行でズバリ
-       - 要因: 検索で得た事実を箇条書き
+       - 要因: 推測されるイベントや動向を箇条書き
        - 戦略: 各職種へのアクションプラン
-    4. **出力形式:** 必ず以下のJSONフォーマットのみを出力せよ。Markdownタグ(```json)は含めるな。
+    3. **出力形式:** 必ず以下のJSONフォーマットのみを出力せよ。Markdownタグは不要。
 
     {{
         "date": "{full_date}",
@@ -203,7 +171,7 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
             "high": "{high_temp}℃", "low": "{low_temp}℃", "rain": "{rain_display}",
             "warning": "{warning_text}"
         }},
-        "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n■市場予測\\n(結論)...\\n\\n■主要因\\n・(イベント名など)...\\n\\n■推奨戦略\\n・...", 
+        "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n■市場予測\\n(結論)...\\n\\n■主要因\\n・...\\n\\n■推奨戦略\\n・...", 
         "timeline": {{
             "morning": {{ "weather": "{w_emoji}", "temp": "{low_temp}℃", "rain": "{rain_am}%", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
             "daytime": {{ "weather": "{w_emoji}", "temp": "{high_temp}℃", "rain": "{rain_pm}%", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
@@ -211,15 +179,35 @@ def get_ai_advice(area_key, area_data, target_date, jma_data):
         }}
     }}
     """
+
+    genai.configure(api_key=API_KEY)
     
+    # 検索ツール定義（最新の書き方: dict形式で指定）
+    # ※ライブラリのバージョンによっては辞書型で渡すのが最も安定します
+    search_tool = {"google_search_retrieval": {}}
+
+    generation_config = { "temperature": 0.7 }
+
+    # 1. まず検索ツール付きでトライ
     try:
-        model = get_model()
-        res = model.generate_content(prompt)
+        model = genai.GenerativeModel('models/gemini-2.5-flash', tools=[search_tool], generation_config=generation_config)
+        # プロンプトに検索指示を追加
+        search_prompt = base_prompt + "\n\n(可能であればGoogle検索ツールを使用し、イベント情報を補強せよ)"
+        res = model.generate_content(search_prompt)
         json_str = extract_json_block(res.text)
         return json.loads(json_str)
     except Exception as e:
-        print(f"⚠️ AI生成エラー: {e}", flush=True)
-        return None
+        print(f"⚠️ 検索モード失敗 ({e}) -> 通常モードで再試行", flush=True)
+        
+        # 2. 失敗したらツールなしでトライ (安全装置)
+        try:
+            model_fallback = genai.GenerativeModel('models/gemini-1.5-flash', generation_config=generation_config)
+            res = model_fallback.generate_content(base_prompt)
+            json_str = extract_json_block(res.text)
+            return json.loads(json_str)
+        except Exception as e2:
+            print(f"❌ 生成完全失敗: {e2}", flush=True)
+            return None
 
 # --- 簡易予測 (長期・エラー時用) ---
 def get_simple_forecast(target_date):
@@ -240,7 +228,7 @@ def get_simple_forecast(target_date):
 # --- メイン ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye 30地点・検索修正版 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye 30地点・完全修正版 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
@@ -253,7 +241,7 @@ if __name__ == "__main__":
         for i in range(90):
             target_date = today + timedelta(days=i)
             
-            if i < 3: # 3日分検索
+            if i < 3: 
                 data = get_ai_advice(area_key, area_data, target_date, jma_data)
                 if data:
                     area_forecasts.append(data)
