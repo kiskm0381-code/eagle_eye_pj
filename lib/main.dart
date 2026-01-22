@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:html' as html; // Webリンク用
 import 'package:http/http.dart' as http;
@@ -15,16 +14,16 @@ void main() async {
 
 // --- 定数・設定 ---
 class AppColors {
-  static const background = Color(0xFF0F172A); // 深いネイビーブラック
+  static const background = Color(0xFF0F172A); // 深いネイビー
   static const cardBackground = Color(0xFF1E293B);
-  static const primary = Color(0xFF3B82F6); // 鮮やかなブルー
+  static const primary = Color(0xFF3B82F6); // ブルー
   static const accent = Color(0xFFF59E0B); // ゴールド
-  static const action = Color(0xFFFF6D00); // エマージェンシーオレンジ
+  static const action = Color(0xFFFF6D00); // オレンジ
   
-  static const rankS = Color(0xFFEF4444); // 赤
-  static const rankA = Color(0xFFF97316); // オレンジ
-  static const rankB = Color(0xFF3B82F6); // 青
-  static const rankC = Color(0xFF10B981); // 緑
+  static const rankS = Color(0xFFEF4444); // 赤 (激混み)
+  static const rankA = Color(0xFFF97316); // オレンジ (混雑)
+  static const rankB = Color(0xFF3B82F6); // 青 (普通)
+  static const rankC = Color(0xFF10B981); // 緑 (閑散)
 }
 
 class JobData {
@@ -135,14 +134,19 @@ class _SplashPageState extends State<SplashPage> with SingleTickerProviderStateM
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ロゴ画像 (assets/image.png)
+              // ★修正: ロゴをWeb URLから取得 (確実に表示させるため)
               Container(
                 width: 180, height: 180,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: AppColors.accent, width: 3),
                   boxShadow: [BoxShadow(color: AppColors.accent.withOpacity(0.4), blurRadius: 20)],
-                  image: const DecorationImage(image: AssetImage('assets/image.png'), fit: BoxFit.cover),
+                  // フリー素材の鷲アイコンを使用 (商用利用可のもの)
+                  image: const DecorationImage(
+                    image: NetworkImage('https://cdn-icons-png.flaticon.com/512/3069/3069172.png'), 
+                    fit: BoxFit.cover,
+                    colorFilter: ColorFilter.mode(AppColors.accent, BlendMode.srcIn) // ゴールドに着色
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -213,7 +217,6 @@ class _OnboardingPageState extends State<OnboardingPage> {
     await prefs.setString('selected_area_id', selectedArea!.id);
     await prefs.setString('selected_job_id', selectedJob!.id);
     await prefs.setString('selected_age', selectedAge!);
-    // ログ記録
     String log = "${DateTime.now()}: Reg ${selectedArea!.name} / ${selectedJob!.label}";
     await prefs.setString('admin_log_${DateTime.now().millisecondsSinceEpoch}', log);
     
@@ -399,7 +402,7 @@ class _MainContainerPageState extends State<MainContainerPage> {
   }
 }
 
-// --- ダッシュボード ---
+// --- ダッシュボード (修正版) ---
 class DashboardPage extends StatelessWidget {
   final List<dynamic> dataList;
   final JobData job;
@@ -423,7 +426,7 @@ class DashboardPage extends StatelessWidget {
     }
     if (dataList.isEmpty) return const Center(child: Text("データがありません"));
 
-    // 3日分表示
+    // 直近3日分を表示 (今回AIが3日分作るようになったので整合性OK)
     final displayData = dataList.take(3).toList();
 
     return PageView.builder(
@@ -440,11 +443,11 @@ class DashboardPage extends StatelessWidget {
               _buildRankCard(dayData),
               const SizedBox(height: 20),
               
-              // ★配置変更: 時間ごとの天気＆アドバイスを先に表示
+              // ★修正: 時間ごとのアドバイスを先に配置
               _buildTimeline(dayData, job),
               const SizedBox(height: 20),
               
-              // ★タイトル変更: 日付入り動的タイトル
+              // ★修正: レポートをその下に配置
               _buildStrategyReport(dayData),
               const SizedBox(height: 20),
             ],
@@ -516,7 +519,7 @@ class DashboardPage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              // 気象庁データ表示
+              // 気温と降水
               Column(children: [
                 const Icon(Icons.thermostat, color: Colors.white, size: 28),
                 Text("$high / $low", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -573,8 +576,11 @@ class DashboardPage extends StatelessWidget {
               const Icon(Icons.thermostat, size: 16, color: Colors.grey),
               Text(temp, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               const SizedBox(width: 8),
-              const Icon(Icons.water_drop, size: 16, color: Colors.blueAccent),
-              Text(rain, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              // 降水確率はあれば表示
+              if(rain != "-") ...[
+                 const Icon(Icons.water_drop, size: 16, color: Colors.blueAccent),
+                 Text(rain, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              ]
             ],
           ),
           const SizedBox(height: 8),
@@ -593,15 +599,37 @@ class DashboardPage extends StatelessWidget {
 
   Widget _buildStrategyReport(Map<String, dynamic> data) {
     final info = data['daily_schedule_and_impact'] as String?;
-    // 日付を抽出してタイトル化 (例: "1月22日のレポート")
-    final dateRaw = data['date'].toString();
-    final dateClean = dateRaw.split(' ')[0].replaceAll(RegExp(r'\d{4}年'), ''); // 年を削除
-    final title = "$dateCleanのレポート";
-
     if (info == null || info.isEmpty) return const SizedBox.shrink();
 
-    // AIテキスト内の重複タイトルを除去
-    final cleanInfo = info.replaceAll(RegExp(r'【.*レポート】'), '').trim();
+    // Markdown風の見出しを整形して表示
+    // "**" で囲まれたテキストを太字にする簡易パーサー
+    List<Widget> parsedContent = [];
+    final lines = info.split('\n');
+    
+    for (var line in lines) {
+      if (line.trim().isEmpty) {
+        parsedContent.add(const SizedBox(height: 8));
+        continue;
+      }
+      
+      if (line.contains('**')) {
+        // 見出し行とみなす
+        final cleanLine = line.replaceAll('**', '').replaceAll('■', '');
+        parsedContent.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6, top: 4),
+            child: Row(children: [
+               const Icon(Icons.check_circle_outline, color: AppColors.accent, size: 16),
+               const SizedBox(width: 6),
+               Expanded(child: Text(cleanLine, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 15))),
+            ]),
+          )
+        );
+      } else {
+        // 通常の本文
+        parsedContent.add(Text(line, style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.white70)));
+      }
+    }
 
     return Container(
       width: double.infinity,
@@ -614,21 +642,20 @@ class DashboardPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Icon(Icons.lightbulb, color: AppColors.accent),
-            const SizedBox(width: 8),
-            // ★修正: 動的タイトル
-            Text(title, style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
+          const Row(children: [
+            Icon(Icons.lightbulb, color: AppColors.accent),
+            SizedBox(width: 8),
+            Text("戦略レポート", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16))
           ]),
-          const SizedBox(height: 12),
-          Text(cleanInfo, style: const TextStyle(fontSize: 14, height: 1.6)),
+          const Divider(color: Colors.white24),
+          ...parsedContent,
         ],
       ),
     );
   }
 }
 
-// --- カレンダー ---
+// --- カレンダー (3ヶ月対応) ---
 class CalendarPage extends StatefulWidget {
   final List<dynamic> dataList;
   final JobData job;
@@ -651,10 +678,14 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _updateSelectedData(DateTime date) {
-    final dateStr = _formatDate(date);
+    // データの日付文字列形式と合わせる
+    // "01月22日 (木)" のような形式または "YYYY-MM-DD" を柔軟に判定
+    // 今回のPython生成ロジックでは "01月22日 (木)" 形式で保存されているはず
+    final dateStr1 = "${date.month.toString().padLeft(2,'0')}月${date.day.toString().padLeft(2,'0')}日";
+    
     try {
       final data = widget.dataList.firstWhere(
-        (item) => _isSameDateStr(item['date'], dateStr),
+        (item) => item['date'].toString().contains(dateStr1),
         orElse: () => null
       );
       setState(() => _selectedDayData = data);
@@ -662,26 +693,26 @@ class _CalendarPageState extends State<CalendarPage> {
       setState(() => _selectedDayData = null);
     }
   }
-  
-  bool _isSameDateStr(String apiDate, String target) {
-    final clean = apiDate.split(' ')[0].replaceAll('年','-').replaceAll('月','-').replaceAll('日','');
-    return clean == target;
-  }
-  String _formatDate(DateTime date) => "${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}";
 
   @override
   Widget build(BuildContext context) {
     final Map<DateTime, Map<String, String>> infoMap = {};
     for (var item in widget.dataList) {
       try {
-        final dStr = item['date'].split(' ')[0].replaceAll('年','-').replaceAll('月','-').replaceAll('日','');
-        final dt = DateTime.parse(dStr);
+        // "01月22日 (木)" -> DateTimeへ変換
+        final raw = item['date'].toString();
+        // 現在の年を補完してパース (簡易実装)
+        final month = int.parse(raw.substring(0, 2));
+        final day = int.parse(raw.substring(3, 5));
+        final year = DateTime.now().year + (month < DateTime.now().month ? 1 : 0); // 年またぎ対応
+        
+        final dt = DateTime(year, month, day);
         final w = item['weather_overview'] ?? {};
         infoMap[dt] = {
           "rank": item['rank'],
           "cond": w['condition'] ?? "",
-          "high": w['high'] ?? "-",
-          "low": w['low'] ?? "-",
+          "high": w['high']?.toString() ?? "-",
+          "low": w['low']?.toString() ?? "-",
         };
       } catch (e) {}
     }
@@ -731,7 +762,6 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildCell(DateTime date, Map<String, String>? info, {bool isSelected=false, bool isToday=false}) {
-    // 祝日または日曜は赤
     bool isHoliday = kHolidays2026.any((h) => isSameDay(h, date)) || date.weekday == DateTime.sunday;
     Color textColor = isHoliday ? Colors.redAccent : Colors.white;
     if (!isHoliday && date.weekday == DateTime.saturday) textColor = Colors.blueAccent;
@@ -748,7 +778,6 @@ class _CalendarPageState extends State<CalendarPage> {
           Text("${date.day}", style: TextStyle(color: textColor, fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
           if (info != null) ...[
             Text(info['cond']!, style: const TextStyle(fontSize: 10)),
-            // 混雑ランクドット
             Container(width: 6, height: 6, decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: info['rank']=="S"?AppColors.rankS : (info['rank']=="A"?AppColors.rankA : (info['rank']=="B"?AppColors.rankB : AppColors.rankC))
@@ -797,7 +826,12 @@ class _SimpleTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final timeline = data['timeline'];
-    if (timeline == null) return const Text("詳細なし");
+    
+    // AIデータがない場合 (長期予報など)
+    if (timeline == null) {
+      final text = data['daily_schedule_and_impact'] ?? "詳細なし";
+      return Text(text, style: const TextStyle(color: Colors.grey));
+    }
     
     String getAdvice(String timeKey) {
       if (timeline[timeKey] == null) return "-";
@@ -857,7 +891,6 @@ class ProfilePage extends StatelessWidget {
           const SizedBox(height: 40),
           const Divider(color: Colors.grey),
           
-          // お問い合わせボタン (Googleフォーム)
           Center(
             child: ElevatedButton.icon(
               icon: const Icon(Icons.mail_outline),
@@ -873,7 +906,6 @@ class ProfilePage extends StatelessWidget {
           ),
           
           const SizedBox(height: 20),
-          // 管理者用隠しボタン
           Center(
             child: GestureDetector(
               onLongPress: () => _showAdminDialog(context),
