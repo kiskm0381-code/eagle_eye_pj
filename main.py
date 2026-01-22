@@ -13,7 +13,6 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 JST = timezone(timedelta(hours=9), 'JST')
 
 # --- 戦略的30地点定義 ---
-# JMAコードは一次細分区域(014100等)を使用。
 TARGET_AREAS = {
     "hakodate": { "name": "北海道 函館", "jma_code": "014100", "lat": 41.7687, "lon": 140.7288, "feature": "観光・夜景・海鮮。冬は雪の影響大。クルーズ船寄港地。" },
     "sapporo": { "name": "北海道 札幌", "jma_code": "016000", "lat": 43.0618, "lon": 141.3545, "feature": "北日本最大の歓楽街ススキノ。雪まつり等のイベント。" },
@@ -57,7 +56,6 @@ def get_weather_emoji(code):
         if c in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212]: return "☁️"
         if 300 <= c < 400: return "☔"
         if 400 <= c < 500: return "⛄"
-        # OpenMeteo Codes
         if c == 0: return "☀️"
         if c in [1, 2, 3]: return "🌤️"
         if c in [45, 48]: return "🌫️"
@@ -67,9 +65,8 @@ def get_weather_emoji(code):
     except: pass
     return "☁️"
 
-# --- データ取得機能 (フォーマット済み文字列を返す) ---
+# --- データ取得機能 ---
 
-# 1. JMA (直近 + 週間)
 def get_jma_full_data(area_code):
     url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
     result = {}
@@ -78,16 +75,13 @@ def get_jma_full_data(area_code):
             data = json.loads(res.read().decode('utf-8'))
             if not data: return result
 
-            # 直近 (今日・明日)
             detailed = data[0]["timeSeries"]
             weathers = detailed[0]["areas"][0]["weatherCodes"]
             pops = detailed[1]["areas"][0]["pops"]
             temps_arr = detailed[2]["areas"][0]["temps"]
             
-            def fmt_temp(val):
-                return f"最高気温:{val}℃" if val != "-" else "最高気温:-℃"
-            
-            def get_temp_pair(t_list):
+            # --- 気温・降水確率の整形ロジック ---
+            def get_temp_fmt(t_list):
                 valid = [float(x) for x in t_list if x != "-"]
                 if not valid: return "最高気温:-℃", "最低気温:-℃"
                 return f"最高気温:{max(valid)}℃", f"最低気温:{min(valid)}℃"
@@ -101,15 +95,15 @@ def get_jma_full_data(area_code):
                 return f"午前:{r(p_am)} / 午後:{r(p_pm)}"
 
             # 今日 (0)
-            h0, l0 = get_temp_pair(temps_arr)
+            h0, l0 = get_temp_fmt(temps_arr)
             r0 = get_rain_fmt(pops, 0)
             result["0"] = {"code": weathers[0], "pop": r0, "high": h0, "low": l0}
             
             # 明日 (1)
             if len(weathers) > 1:
                 t_tmr = temps_arr[2:] if len(temps_arr) > 2 else []
-                h1, l1 = get_temp_pair(t_tmr)
-                r1 = get_rain_fmt(pops, 2)
+                h1, l1 = get_temp_fmt(t_tmr)
+                r1 = get_rain_fmt(pops, 2) 
                 result["1"] = {"code": weathers[1], "pop": r1, "high": h1, "low": l1}
 
             # 週間予報 (JMA)
@@ -138,7 +132,6 @@ def get_jma_full_data(area_code):
         print(f"JMA Error ({area_code}): {e}")
     return result
 
-# 2. JMA 警報
 def get_jma_warning(area_code):
     url = f"https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
     try:
@@ -149,9 +142,7 @@ def get_jma_warning(area_code):
     except: pass
     return "特になし"
 
-# 3. Open-Meteo (長期用・補完用)
 def get_open_meteo_forecast(lat, lon):
-    # 92日分取得 (余裕を持って)
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=Asia%2FTokyo&forecast_days=92"
     result = {}
     try:
@@ -176,8 +167,21 @@ def get_open_meteo_forecast(lat, lon):
     except: pass
     return result
 
-# --- Gemini API ---
-def call_gemini_search(prompt):
+# --- Gemini API (リトライ機能付き) ---
+def call_with_retry(func, *args, **kwargs):
+    """API呼び出しをリトライするラッパー"""
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        result = func(*args, **kwargs)
+        if result is not None:
+            return result
+        # 失敗したら少し待機 (API制限回避)
+        if attempt < MAX_RETRIES - 1:
+            print(f" ...Retry({attempt+1})", end="", flush=True)
+            time.sleep(10)
+    return None
+
+def _call_gemini_search_core(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
     headers = { "Content-Type": "application/json" }
     payload = {
@@ -191,10 +195,13 @@ def call_gemini_search(prompt):
             data = res.json()
             if "candidates" in data:
                 return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            # エラーコードによってはNoneを返してリトライさせる
+            pass
     except: pass
     return None
 
-def call_gemini_json(prompt):
+def _call_gemini_json_core(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
     headers = { "Content-Type": "application/json" }
     payload = {
@@ -210,6 +217,12 @@ def call_gemini_json(prompt):
     except: pass
     return None
 
+def call_gemini_search(prompt):
+    return call_with_retry(_call_gemini_search_core, prompt)
+
+def call_gemini_json(prompt):
+    return call_with_retry(_call_gemini_json_core, prompt)
+
 def extract_json_block(text):
     try:
         match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -217,7 +230,7 @@ def extract_json_block(text):
     except: pass
     return text
 
-# --- 長期予報一括生成 (高速化の肝) ---
+# --- 長期予報一括生成 ---
 def get_long_term_strategy_text(area_name):
     print(f"🤖 [AI-Long] {area_name} 長期傾向分析...", end="", flush=True)
     prompt = f"""
@@ -237,11 +250,10 @@ def get_long_term_strategy_text(area_name):
     """
     search_res = call_gemini_search(prompt) or "データなし"
     
-    # 整形のみ(JSONではない)
+    # 整形 (JSON不要)
     fmt_prompt = f"以下の情報を整理し、Markdownテキストのみ出力せよ(JSON不要)。\n\n{search_res}"
-    res = call_gemini_json(fmt_prompt) # JSONモードで呼ぶが中身はテキスト
+    res = call_gemini_json(fmt_prompt)
     
-    # JSONで返ってきた場合の安全策
     try:
         j = json.loads(extract_json_block(res))
         return "\n".join([str(v) for v in j.values()])
@@ -336,7 +348,7 @@ def get_simple_data_with_strategy(target_date, weather_info, strategy_text):
 # --- メイン処理 ---
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye v1.0 Final (3-Layer Optimized) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye v1.0 Final (3-Layer + Retry) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     
@@ -371,8 +383,9 @@ if __name__ == "__main__":
                 if data:
                     area_forecasts.append(data)
                     print(" OK")
-                    time.sleep(1.5)
+                    time.sleep(1) 
                 else:
+                    # リトライしてもダメなら諦めるが、リトライ機能があるので確率は低い
                     print(" -> Simple")
                     area_forecasts.append(get_simple_data_with_strategy(target_date, weather_info, long_term_text))
             
@@ -381,7 +394,7 @@ if __name__ == "__main__":
                 if data:
                     area_forecasts.append(data)
                     print(" OK")
-                    time.sleep(1.5)
+                    time.sleep(1)
                 else:
                     print(" -> Simple")
                     area_forecasts.append(get_simple_data_with_strategy(target_date, weather_info, long_term_text))
