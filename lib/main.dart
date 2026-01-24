@@ -125,7 +125,6 @@ class _SplashPageState extends State<SplashPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ロゴ (静的)
             Container(
               width: 180, height: 180,
               decoration: BoxDecoration(
@@ -407,7 +406,6 @@ class DashboardPage extends StatelessWidget {
     }
     if (dataList.isEmpty) return const Center(child: Text("データがありません"));
 
-    // 直近3日分を表示
     final displayData = dataList.take(3).toList();
 
     return PageView.builder(
@@ -500,7 +498,8 @@ class DashboardPage extends StatelessWidget {
             children: [
               Column(children: [
                 const Icon(Icons.thermostat, color: Colors.white, size: 28),
-                Text("$high / $low", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(high, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), // 修正
+                Text(low, style: const TextStyle(fontSize: 16)), // 修正
               ]),
               Column(children: [
                 const Icon(Icons.umbrella, color: Colors.white, size: 28),
@@ -720,6 +719,9 @@ class _CalendarPageState extends State<CalendarPage> {
         infoMap[dt] = {
           "rank": item['rank'],
           "cond": w['condition'] ?? "",
+          "rain": w['rain'] ?? "", // ★追加
+          "high": w['high'] ?? "", // ★追加
+          "low": w['low'] ?? "",   // ★追加
         };
       } catch (e) {}
     }
@@ -784,8 +786,18 @@ class _CalendarPageState extends State<CalendarPage> {
         children: [
           Text("${date.day}", style: TextStyle(color: textColor, fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
           if (info != null) ...[
-            Text(info['cond']!, style: const TextStyle(fontSize: 10)),
-            Container(width: 6, height: 6, decoration: BoxDecoration(
+            Text(info['cond']!, style: const TextStyle(fontSize: 9)),
+            // ★修正: カレンダー内に詳細情報を詰め込む
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(info['high']!.replaceAll("最高気温:", "").replaceAll("℃", ""), style: const TextStyle(fontSize: 8, color: Colors.redAccent)),
+                const Text("/", style: TextStyle(fontSize: 8)),
+                Text(info['low']!.replaceAll("最低気温:", "").replaceAll("℃", ""), style: const TextStyle(fontSize: 8, color: Colors.blueAccent)),
+              ],
+            ),
+            Text(info['rain']!.split('/')[0], style: const TextStyle(fontSize: 8, color: Colors.lightBlue)), // 降水確率(簡易)
+            Container(width: 4, height: 4, decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: info['rank']=="S"?AppColors.rankS : (info['rank']=="A"?AppColors.rankA : (info['rank']=="B"?AppColors.rankB : AppColors.rankC))
             )),
