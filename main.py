@@ -3,15 +3,23 @@ import json
 import time
 import urllib.request
 import urllib.error
-import math
 import re
 from datetime import datetime, timedelta, timezone
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- 設定 ---
+import requests
+
+# =========================
+# 設定
+# =========================
 API_KEY = os.environ.get("GEMINI_API_KEY")
-JST = timezone(timedelta(hours=9), 'JST')
+JST = timezone(timedelta(hours=9), "JST")
+
+RUN_DAYS = 90
+AI_DAYS = 7
+
+MAX_WORKERS = 4  # 並列しすぎるとGemini/APIで詰まりやすいので控えめ推奨
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # --- 2026年 祝日定義 ---
 HOLIDAYS_2026 = {
@@ -21,7 +29,7 @@ HOLIDAYS_2026 = {
     "2026-10-12", "2026-11-03", "2026-11-23", "2026-11-24"
 }
 
-# --- 戦略的30地点定義 ---
+# --- 戦略的30地点定義（そのまま使用） ---
 TARGET_AREAS = {
     "hakodate": { "name": "北海道 函館", "jma_code": "014100", "amedas_code": "23411", "lat": 41.7687, "lon": 140.7288, "feature": "観光・夜景・海鮮。冬は雪の影響大。クルーズ船寄港地。" },
     "sapporo": { "name": "北海道 札幌", "jma_code": "016000", "amedas_code": "14163", "lat": 43.0618, "lon": 141.3545, "feature": "北日本最大の歓楽街ススキノ。雪まつり等のイベント。" },
@@ -56,133 +64,147 @@ TARGET_AREAS = {
     "okinawa_naha": { "name": "沖縄 那覇", "jma_code": "471000", "amedas_code": "91197", "lat": 26.2124, "lon": 127.6809, "feature": "国際通り。観光客メイン。台風等の天候影響大。" },
 }
 
-# --- 天気予報コード変換 ---
-def get_weather_emoji(code):
+# =========================
+# 天気アイコン
+# =========================
+def get_weather_emoji_jma(code):
+    """JMA weather code → emoji（簡易）"""
     try:
         c = int(code)
-        if c in [100, 101, 123, 124, 0]: return "☀️"
-        if c in [102, 103, 104, 105, 106, 107, 108, 110, 111, 112, 1, 2, 3]: return "🌤️"
-        if c in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 45, 48]: return "☁️"
-        if 300 <= c < 350: return "☔"
-        if c in [51, 53, 55, 61, 63, 65, 80, 81, 82]: return "☔"
-        if 350 <= c < 500: return "☃️" # 雪
-        if c in [71, 73, 75, 77, 85, 86]: return "☃️"
-        if c >= 95: return "⛈️"
-    except: pass
+        if c in [100, 101, 123, 124, 0]:
+            return "☀️"
+        if c in [102, 103, 104, 105, 106, 107, 108, 110, 111, 112, 1, 2, 3]:
+            return "🌤️"
+        if c in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 45, 48]:
+            return "☁️"
+        if 300 <= c < 350:
+            return "☔"
+        if c in [51, 53, 55, 61, 63, 65, 80, 81, 82]:
+            return "☔"
+        if 350 <= c < 500:
+            return "☃️"
+        if c in [71, 73, 75, 77, 85, 86]:
+            return "☃️"
+        if c >= 95:
+            return "⛈️"
+    except:
+        pass
     return "☁️"
 
-# --- AMeDAS 実況値取得 ---
+
+def get_weather_emoji_openmeteo(code):
+    """Open-Meteo weathercode → emoji（ざっくり）"""
+    try:
+        c = int(code)
+        if c == 0:
+            return "☀️"
+        if c in [1, 2, 3]:
+            return "🌤️" if c in [1, 2] else "☁️"
+        if c in [45, 48]:
+            return "☁️"
+        if c in [51, 53, 55, 56, 57]:
+            return "☔"
+        if c in [61, 63, 65, 66, 67]:
+            return "☔"
+        if c in [71, 73, 75, 77, 85, 86]:
+            return "☃️"
+        if c in [80, 81, 82]:
+            return "☔"
+        if c in [95, 96, 99]:
+            return "⛈️"
+    except:
+        pass
+    return "☁️"
+
+# =========================
+# AMeDAS（今日の実測で最高/最低補正）
+# =========================
 def get_amedas_daily_stats(amedas_code):
-    today_str = datetime.now(JST).strftime('%Y%m%d')
+    """
+    今日0時〜現在の1時間値から 最高/最低 を算出
+    """
+    today_str = datetime.now(JST).strftime("%Y%m%d")
     url = f"https://www.jma.go.jp/bosai/amedas/data/point/{amedas_code}/{today_str}_1h.json"
     try:
         with urllib.request.urlopen(url, timeout=10) as res:
-            data = json.loads(res.read().decode('utf-8'))
-            temps = []
-            for hour, vals in data.items():
-                if "temp" in vals and vals["temp"][0] is not None:
-                    temps.append(vals["temp"][0])
-            if temps:
-                return {"max": max(temps), "min": min(temps)}
-    except: pass
+            data = json.loads(res.read().decode("utf-8"))
+        temps = []
+        for _, vals in data.items():
+            if isinstance(vals, dict) and "temp" in vals and vals["temp"][0] is not None:
+                temps.append(vals["temp"][0])
+        if temps:
+            return {"max": max(temps), "min": min(temps)}
+    except:
+        pass
     return None
 
-# --- JMA データ取得機能 (時間帯別データ強化) ---
+# =========================
+# JMA 予報（従来のdaily_db構造を維持）
+# =========================
 def get_jma_forecast_data(area_code):
     forecast_url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{area_code}.json"
     warning_url = f"https://www.jma.go.jp/bosai/warning/data/warning/{area_code}.json"
-    
-    daily_db = {} 
+
+    daily_db = {}
 
     try:
         with urllib.request.urlopen(forecast_url, timeout=15) as res:
-            data = json.loads(res.read().decode('utf-8'))
-            
-            # --- 詳細予報 (data[0]) ---
-            ts_weather = data[0]["timeSeries"][0]
-            codes = ts_weather["areas"][0]["weatherCodes"]
-            dates_w = ts_weather["timeDefines"]
-            for i, d in enumerate(dates_w):
+            data = json.loads(res.read().decode("utf-8"))
+
+        # 詳細（data[0]）
+        ts_weather = data[0]["timeSeries"][0]
+        codes = ts_weather["areas"][0]["weatherCodes"]
+        dates_w = ts_weather["timeDefines"]
+        for i, d in enumerate(dates_w):
+            date_key = d.split("T")[0]
+            daily_db.setdefault(date_key, {})
+            daily_db[date_key]["code"] = codes[i]
+
+        # 降水確率（細かい時間帯のpopsが入る）
+        ts_rain = data[0]["timeSeries"][1]
+        pops = ts_rain["areas"][0]["pops"]
+        dates_r = ts_rain["timeDefines"]
+        for i, d in enumerate(dates_r):
+            date_key = d.split("T")[0]
+            if date_key not in daily_db:
+                continue
+            daily_db[date_key].setdefault("rain_raw", [])
+            daily_db[date_key]["rain_raw"].append(pops[i])
+
+        # 気温（時系列）
+        ts_temp = data[0]["timeSeries"][2]
+        temps = ts_temp["areas"][0]["temps"]
+        dates_t = ts_temp["timeDefines"]
+        for i, d in enumerate(dates_t):
+            date_key = d.split("T")[0]
+            if date_key not in daily_db:
+                continue
+            daily_db[date_key].setdefault("temp_raw", [])
+            daily_db[date_key]["temp_raw"].append(temps[i])
+
+        # 週間（data[1]）
+        if len(data) > 1:
+            weekly = data[1]["timeSeries"]
+            dates_wk = weekly[0]["timeDefines"]
+            w_codes = weekly[0]["areas"][0]["weatherCodes"]
+            w_pops = weekly[0]["areas"][0]["pops"]
+            w_min = weekly[1]["areas"][0]["tempsMin"]
+            w_max = weekly[1]["areas"][0]["tempsMax"]
+
+            for i, d in enumerate(dates_wk):
                 date_key = d.split("T")[0]
-                if date_key not in daily_db: daily_db[date_key] = {}
-                daily_db[date_key]["code"] = codes[i]
-                
-                # ★修正: 時間帯別の天気コードも取得
-                time_part = d.split("T")[1].split("+")[0]
-                hour = int(time_part.split(":")[0])
-                if "weather_hourly" not in daily_db[date_key]: daily_db[date_key]["weather_hourly"] = {}
-                
-                # 時間マッピング
-                if 5 <= hour < 11: daily_db[date_key]["weather_hourly"]["morning"] = codes[i]
-                elif 11 <= hour < 17: daily_db[date_key]["weather_hourly"]["day"] = codes[i]
-                elif 17 <= hour <= 23: daily_db[date_key]["weather_hourly"]["night"] = codes[i]
+                daily_db.setdefault(date_key, {})
+                daily_db[date_key].setdefault("code", w_codes[i])
 
-            # 降水確率
-            ts_rain = data[0]["timeSeries"][1]
-            pops = ts_rain["areas"][0]["pops"]
-            dates_r = ts_rain["timeDefines"]
-            for i, d in enumerate(dates_r):
-                date_key = d.split("T")[0]
-                if date_key not in daily_db: continue
-                
-                time_part = d.split("T")[1].split("+")[0]
-                hour = int(time_part.split(":")[0])
-                if "rain_hourly" not in daily_db[date_key]: daily_db[date_key]["rain_hourly"] = {}
-                
-                # 時間帯別 (午前/午後と書かず、%数値のみ)
-                if 5 <= hour < 11: daily_db[date_key]["rain_hourly"]["morning"] = pops[i] + "%"
-                elif 11 <= hour < 17: daily_db[date_key]["rain_hourly"]["day"] = pops[i] + "%"
-                elif 17 <= hour <= 23: daily_db[date_key]["rain_hourly"]["night"] = pops[i] + "%"
-                
-                if "rain_raw" not in daily_db[date_key]: daily_db[date_key]["rain_raw"] = []
-                daily_db[date_key]["rain_raw"].append(pops[i])
+                # pop
+                if i < len(w_pops) and w_pops[i] != "-":
+                    daily_db[date_key].setdefault("rain_raw", [w_pops[i]])
 
-            # 気温 (時系列)
-            ts_temp = data[0]["timeSeries"][2]
-            temps = ts_temp["areas"][0]["temps"]
-            dates_t = ts_temp["timeDefines"]
-            for i, d in enumerate(dates_t):
-                date_key = d.split("T")[0]
-                if date_key not in daily_db: continue
-                
-                time_part = d.split("T")[1].split("+")[0]
-                hour = int(time_part.split(":")[0])
-                if "temp_hourly" not in daily_db[date_key]: daily_db[date_key]["temp_hourly"] = {}
-                
-                # 時間に近い気温
-                if 8 <= hour <= 10: daily_db[date_key]["temp_hourly"]["morning"] = temps[i]
-                elif 14 <= hour <= 16: daily_db[date_key]["temp_hourly"]["day"] = temps[i]
-                elif 20 <= hour <= 22: daily_db[date_key]["temp_hourly"]["night"] = temps[i]
-
-                if "temp_raw" not in daily_db[date_key]: daily_db[date_key]["temp_raw"] = []
-                daily_db[date_key]["temp_raw"].append(temps[i])
-
-            # --- 週間予報 (data[1]) ---
-            if len(data) > 1:
-                weekly = data[1]["timeSeries"]
-                dates_wk = weekly[0]["timeDefines"]
-                w_codes = weekly[0]["areas"][0]["weatherCodes"]
-                w_pops = weekly[0]["areas"][0]["pops"] 
-                w_min = weekly[1]["areas"][0]["tempsMin"]
-                w_max = weekly[1]["areas"][0]["tempsMax"]
-                
-                for i, d in enumerate(dates_wk):
-                    date_key = d.split("T")[0]
-                    if date_key not in daily_db: daily_db[date_key] = {}
-                    
-                    if "code" not in daily_db[date_key]: daily_db[date_key]["code"] = w_codes[i]
-                    
-                    val = w_pops[i] if i < len(w_pops) else "-"
-                    if val != "-": 
-                        if "rain_raw" not in daily_db[date_key]: daily_db[date_key]["rain_raw"] = [val]
-                        if "rain_hourly" not in daily_db[date_key]: 
-                            daily_db[date_key]["rain_hourly"] = {"morning": val+"%", "day": val+"%", "night": val+"%"}
-                    
-                    t_min_val = w_min[i] if i < len(w_min) and w_min[i]!="" else None
-                    t_max_val = w_max[i] if i < len(w_max) and w_max[i]!="" else None
-                    
-                    if t_min_val or t_max_val:
-                        daily_db[date_key]["temp_summary"] = {"min": t_min_val, "max": t_max_val}
+                # min/max
+                tmin = w_min[i] if i < len(w_min) and w_min[i] != "" else None
+                tmax = w_max[i] if i < len(w_max) and w_max[i] != "" else None
+                if tmin is not None or tmax is not None:
+                    daily_db[date_key]["temp_summary"] = {"min": tmin, "max": tmax}
 
     except Exception as e:
         print(f"JMA Parse Error ({area_code}): {e}")
@@ -190,280 +212,646 @@ def get_jma_forecast_data(area_code):
     warning_text = "特になし"
     try:
         with urllib.request.urlopen(warning_url, timeout=5) as res:
-            w_data = json.loads(res.read().decode('utf-8'))
-            if "warnings" in w_data:
-                names = []
-                for w in w_data["warnings"]:
-                    if w["status"] not in ["発表なし", "解除"]:
-                        names.append("注意報・警報あり")
-                        break
-                if names: warning_text = "気象警報・注意報 発表中"
-    except: pass
+            w_data = json.loads(res.read().decode("utf-8"))
+        if "warnings" in w_data:
+            for w in w_data["warnings"]:
+                if w.get("status") not in ["発表なし", "解除"]:
+                    warning_text = "気象警報・注意報 発表中"
+                    break
+    except:
+        pass
 
     return daily_db, warning_text
 
-# --- Gemini API ---
-def call_gemini_search(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
-    headers = { "Content-Type": "application/json" }
-    payload = {
-        "contents": [{ "parts": [{"text": prompt}] }],
-        "tools": [{ "googleSearch": {} }],
-        "generationConfig": { "temperature": 0.7 }
-    }
+# =========================
+# Open-Meteo（時間帯別の気温/湿度/降水確率/天気コード）
+# =========================
+def fetch_openmeteo_hourly(lat, lon, days=7):
+    """
+    Open-Meteoからhourlyを取得（無料/キー不要）
+    取得項目: temperature_2m, relative_humidity_2m, precipitation_probability, weathercode
+    """
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,weathercode"
+        "&timezone=Asia%2FTokyo"
+        f"&forecast_days={days}"
+    )
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=60)
+        res = requests.get(url, timeout=15)
         if res.status_code == 200:
-            data = res.json()
-            if "candidates" in data and len(data["candidates"]) > 0:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-    except: pass
+            return res.json()
+    except:
+        pass
     return None
 
-def call_gemini_json(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
-    headers = { "Content-Type": "application/json" }
-    payload = {
-        "contents": [{ "parts": [{"text": prompt}] }],
-        "generationConfig": { "temperature": 0.7, "responseMimeType": "application/json" }
+def _slot_filter(hours, start_h, end_h):
+    # start <= hour < end
+    return [i for i, h in enumerate(hours) if start_h <= h < end_h]
+
+def build_slot_weather(openmeteo_json, target_date):
+    """
+    target_dateの日付に対して、朝/昼/夜の代表値を作る
+    - temp: 中央付近の値（9時/15時/21時）を優先、無ければ平均
+    - humidity: 同様
+    - rain: precipitation_probability の最大（リスク表現）
+    - emoji: weathercode から
+    """
+    if not openmeteo_json:
+        return None
+
+    hourly = openmeteo_json.get("hourly", {})
+    times = hourly.get("time", [])
+    temps = hourly.get("temperature_2m", [])
+    hums = hourly.get("relative_humidity_2m", [])
+    pops = hourly.get("precipitation_probability", [])
+    wcodes = hourly.get("weathercode", [])
+
+    # target_dateの行だけ抽出
+    date_str = target_date.strftime("%Y-%m-%d")
+    idxs = [i for i, t in enumerate(times) if t.startswith(date_str)]
+    if not idxs:
+        return None
+
+    # 時刻（hour）取り出し
+    hours = []
+    for i in idxs:
+        # "YYYY-MM-DDTHH:MM"
+        try:
+            hh = int(times[i].split("T")[1].split(":")[0])
+            hours.append(hh)
+        except:
+            hours.append(None)
+
+    def pick_mid_or_avg(id_list, prefer_hour):
+        # prefer_hourに近いものを優先して取る（なければ平均）
+        best = None
+        best_diff = 999
+        for k in id_list:
+            if hours[k] is None:
+                continue
+            d = abs(hours[k] - prefer_hour)
+            if d < best_diff:
+                best_diff = d
+                best = k
+        if best is not None:
+            return best, True
+
+        # 平均
+        vals = []
+        for k in id_list:
+            try:
+                vals.append(float(temps[k]))
+            except:
+                pass
+        if vals:
+            return sum(vals) / len(vals), False
+        return None, False
+
+    def slot_pack(slot_name, start_h, end_h, prefer_hour):
+        ids = [idxs[i] for i in range(len(idxs)) if hours[i] is not None and start_h <= hours[i] < end_h]
+        if not ids:
+            return {"weather": "☁️", "temp": "-", "humidity": "-", "rain": "-", "wcode": None}
+
+        # temp/humidity（prefer時刻付近）
+        # temp
+        k_temp = None
+        best = None
+        for k in ids:
+            try:
+                hh = int(times[k].split("T")[1].split(":")[0])
+                d = abs(hh - prefer_hour)
+                if best is None or d < best:
+                    best = d
+                    k_temp = k
+            except:
+                pass
+
+        temp_val = None
+        hum_val = None
+        wcode_val = None
+        if k_temp is not None:
+            try:
+                temp_val = round(float(temps[k_temp]))
+            except:
+                temp_val = None
+            try:
+                hum_val = int(round(float(hums[k_temp])))
+            except:
+                hum_val = None
+            try:
+                wcode_val = int(wcodes[k_temp])
+            except:
+                wcode_val = None
+
+        # fallback: 平均
+        if temp_val is None:
+            tv = []
+            for k in ids:
+                try:
+                    tv.append(float(temps[k]))
+                except:
+                    pass
+            if tv:
+                temp_val = round(sum(tv) / len(tv))
+        if hum_val is None:
+            hv = []
+            for k in ids:
+                try:
+                    hv.append(float(hums[k]))
+                except:
+                    pass
+            if hv:
+                hum_val = int(round(sum(hv) / len(hv)))
+
+        # rain: 最大（リスク）
+        rain_max = None
+        rv = []
+        for k in ids:
+            try:
+                rv.append(int(pops[k]))
+            except:
+                pass
+        if rv:
+            rain_max = max(rv)
+
+        emoji = get_weather_emoji_openmeteo(wcode_val) if wcode_val is not None else "☁️"
+
+        return {
+            "weather": emoji,
+            "temp": f"{temp_val}℃" if temp_val is not None else "-",
+            "humidity": f"{hum_val}%" if hum_val is not None else "-",
+            "rain": f"{rain_max}%" if rain_max is not None else "-",
+            "wcode": wcode_val
+        }
+
+    return {
+        "morning": slot_pack("morning", 6, 12, 9),
+        "daytime": slot_pack("daytime", 12, 18, 15),
+        "night": slot_pack("night", 18, 24, 21),
     }
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=60)
-        if res.status_code == 200:
-            data = res.json()
-            if "candidates" in data and len(data["candidates"]) > 0:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-    except: pass
+
+# =========================
+# Gemini 呼び出し（リトライ付き）
+# =========================
+def _post_json(url, headers, payload, timeout=60, retry=3, backoff=2.0):
+    for i in range(retry):
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            if res.status_code == 200:
+                return res.json()
+        except:
+            pass
+        time.sleep(backoff ** i)
     return None
+
+def call_gemini_search(prompt):
+    """GoogleSearch tool を使ってテキスト取得"""
+    if not API_KEY:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {"temperature": 0.4}
+    }
+    data = _post_json(url, headers, payload, timeout=75, retry=3)
+    if not data:
+        return None
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return None
+
+def call_gemini_json(prompt):
+    """JSON出力（検索ツールなし）"""
+    if not API_KEY:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
+    }
+    data = _post_json(url, headers, payload, timeout=75, retry=3)
+    if not data:
+        return None
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return None
 
 def extract_json_block(text):
     try:
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match: return match.group(0)
-    except: pass
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return match.group(0)
+    except:
+        pass
     return text
 
-def get_long_term_text_safe(area_name):
-    prompt = f"""
-    エリア: {area_name}
-    向こう3ヶ月(2-4月)の気象傾向とイベントをGoogle検索し、
-    「〜でしょう。」「〜が予定されています。」という自然な日本語の文章でまとめて。
-    JSON形式や辞書形式の出力は禁止。読みやすいMarkdownテキストのみ出力せよ。
+# =========================
+# 7日分のEvent/Trafficを「1回の検索」でまとめて取る
+# =========================
+def fetch_event_traffic_7days(area_name):
     """
-    res = call_gemini_search(prompt)
-    if not res: return "長期予報データの取得に失敗しました。平年並みの傾向を参考にしてください。"
-    return res
+    各エリアにつき、検索は1回で7日分のイベント/交通を拾う。
+    返り値: dict[YYYY-MM-DD] = "箇条書きテキスト"
+    """
+    today = datetime.now(JST).date()
+    dates = [(today + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(AI_DAYS)]
 
-# --- AI生成 (7日間) ---
-def get_ai_advice(area_key, area_data, target_date, daily_db, warning_text):
-    if not API_KEY: return None
+    search_prompt = f"""
+あなたはプロの調査員です。
+対象エリア: {area_name}
+期間: {dates[0]} から {dates[-1]}（7日）
 
-    today_dt = datetime.now(JST)
-    is_today = (target_date.date() == today_dt.date())
-    
-    date_str = target_date.strftime('%Y-%m-%d')
-    date_display = target_date.strftime('%m月%d日')
-    weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
-    full_date = f"{date_display} ({weekday_str})"
-    
-    day_data = daily_db.get(date_str, {})
-    w_code = day_data.get("code", "200")
-    w_emoji = get_weather_emoji(w_code)
-    
-    # --- 気温決定ロジック (AMeDASハイブリッド) ---
-    summary = day_data.get("temp_summary", {})
+次の情報を、日付ごとに整理して徹底的に検索してまとめてください。
+優先順位:
+1) 交通: JR/地下鉄/私鉄/バス/航空の遅延・運休、道路の通行止め、規制、渋滞、事故
+2) イベント: ライブ/スポーツ/展示会/祭り等（開催中止/変更も）
+3) 注意情報: 大雪/強風/警報級など、交通に影響しうる情報
+
+出力は「日付見出し + 箇条書き」形式で、必ず7日分を作ること。
+日付が分からない情報は該当日付に入れず「不明」枠にまとめること。
+フェイクは書かない。曖昧なら「未確認」と明記。
+"""
+    text = call_gemini_search(search_prompt)
+    if not text:
+        return {d: "特段の検索結果なし" for d in dates}
+
+    # 構造化（検索ツールは使わず、短いJSONに整形）
+    json_prompt = f"""
+次の文章を解析して、期間内7日分を必ず埋めたJSONに変換してください。
+キーは日付(YYYY-MM-DD)、値はその日のEvent/Traffic要約（箇条書き文字列、改行OK）。
+期間: {dates[0]} から {dates[-1]}
+文章:
+{text}
+
+出力はこのJSONのみ:
+{{
+  "{dates[0]}": "...",
+  ...
+  "{dates[-1]}": "..."
+}}
+"""
+    jtxt = call_gemini_json(json_prompt)
+    if not jtxt:
+        return {d: "特段の検索結果なし" for d in dates}
+
+    try:
+        j = json.loads(extract_json_block(jtxt))
+        # 7日分穴埋め
+        for d in dates:
+            j.setdefault(d, "特段の検索結果なし")
+        return j
+    except:
+        return {d: "特段の検索結果なし" for d in dates}
+
+# =========================
+# 気温（最高/最低）をJMAベースで決定（最低気温は必ず予報で表示）
+# =========================
+def decide_high_low(area_data, target_date, day_data, is_today):
+    """
+    高/低: 週間(temp_summary) を優先 → ない場合はtemp_rawから推定
+    今日だけ: AMeDAS実測で上書き補正（従来ロジック）
+    """
+    summary = day_data.get("temp_summary", {}) if day_data else {}
     high_val = summary.get("max")
     low_val = summary.get("min")
-    
-    t_raw = day_data.get("temp_raw", [])
+
+    # temp_raw補完
+    t_raw = day_data.get("temp_raw", []) if day_data else []
     valid_t = []
     for x in t_raw:
-        try: valid_t.append(float(x))
-        except: pass
-    
-    if not high_val or not low_val:
-        if valid_t:
-            if not high_val: high_val = max(valid_t)
-            if not low_val: low_val = min(valid_t)
+        try:
+            valid_t.append(float(x))
+        except:
+            pass
+    if valid_t:
+        if high_val is None:
+            high_val = max(valid_t)
+        if low_val is None:
+            low_val = min(valid_t)
 
+    # 今日のみ: AMeDASで補正（最高/最低）
     if is_today:
         amedas_stats = get_amedas_daily_stats(area_data.get("amedas_code", ""))
         if amedas_stats:
             actual_min = amedas_stats["min"]
             actual_max = amedas_stats["max"]
-            if low_val is None or (low_val > actual_min): low_val = actual_min
-            if high_val is None or (actual_max > high_val): high_val = actual_max
+            if low_val is None or (low_val > actual_min):
+                low_val = actual_min
+            if high_val is None or (actual_max > high_val):
+                high_val = actual_max
 
-    str_high = f"{high_val}" if high_val is not None else "-"
-    str_low = f"{low_val}" if low_val is not None else "-"
-    
-    if str_high == str_low and str_high != "-":
-        str_low = "-" 
+    # 文字列化
+    str_high = f"{round(float(high_val))}" if high_val is not None else "-"
+    str_low = f"{round(float(low_val))}" if low_val is not None else "-"
 
-    # --- 降水確率 ---
-    r_raw = day_data.get("rain_raw", [])
+    return str_high, str_low
+
+def decide_rain_display(day_data):
+    r_raw = day_data.get("rain_raw", []) if day_data else []
     rain_val = "-"
     if r_raw:
-        try: 
-            vals = [int(x) for x in r_raw if x != "-"]
-            if vals: rain_val = f"{max(vals)}%"
-        except: pass
-    rain_display = rain_val
-
-    # --- タイムライン詳細 (時間帯別) ---
-    # 天気
-    w_hourly = day_data.get("weather_hourly", {})
-    w_m = get_weather_emoji(w_hourly.get("morning", w_code))
-    w_d = get_weather_emoji(w_hourly.get("day", w_code))
-    w_n = get_weather_emoji(w_hourly.get("night", w_code))
-
-    # 降水確率
-    r_hourly = day_data.get("rain_hourly", {})
-    r_m = r_hourly.get("morning", "-")
-    r_d = r_hourly.get("day", "-")
-    r_n = r_hourly.get("night", "-")
-    if r_m == "-" and len(r_raw) >= 1: r_m = f"{r_raw[0]}%"
-    if r_d == "-" and len(r_raw) >= 1: r_d = f"{r_raw[0]}%"
-    if r_n == "-" and len(r_raw) >= 1: r_n = f"{r_raw[0]}%"
-
-    # 気温 (時系列のピンポイント値を使用)
-    t_hourly = day_data.get("temp_hourly", {})
-    # 値がなければ最高気温で代用せず "-" にする(正直に)
-    t_m = f"{t_hourly.get('morning', '-')}" 
-    if t_m != "-": t_m += "℃"
-    t_d = f"{t_hourly.get('day', '-')}"
-    if t_d != "-": t_d += "℃"
-    t_n = f"{t_hourly.get('night', '-')}"
-    if t_n != "-": t_n += "℃"
-
-    # もしピンポイント気温が取れなかった場合(週間予報など)、High/Lowではなく「-」のままにするか、
-    # ユーザー要望の「最高/最低両方」ではなく「その時間の温度」なので、
-    # 週間予報で時間がわからない場合は、最高気温を昼、最低を夜に入れるなどの推測を行う
-    if t_d == "-": t_d = f"{str_high}℃" # 昼は最高に近い
-    if t_n == "-": t_n = f"{str_low}℃"  # 夜は最低に近い
-    if t_m == "-": t_m = f"{str_low}℃"  # 朝も最低に近い
-
-    print(f"🤖 {area_data['name']} / {full_date} ", end="", flush=True)
-
-    print("🔍", end="", flush=True)
-    search_prompt = f"""
-    エリア: {area_data['name']}
-    日付: {date_str}
-    
-    以下のキーワードでニュースや運行情報を徹底的に検索せよ:
-    「{area_data['name']} 交通情報」「{area_data['name']} イベント」「{area_data['name']} 運行状況」「{area_data['name']} 通行止め」「{area_data['name']} 大雪」「{area_data['name']} 遅延」
-    """
-    search_res = call_gemini_search(search_prompt) or "特段の検索結果なし"
-
-    print("📝", end="", flush=True)
-    
-    # プロンプト修正: タクシー運転手向け & 時間帯別データ
-    json_prompt = f"""
-    あなたは世界屈指の戦略コンサルタントです。
-    指定の職業のユーザーが、仕事の意思決定において最も頼りにするような、正確で洞察に満ちたアドバイスを提供してください。
-    
-    【条件】
-    エリア: {area_data['name']}
-    日時: {full_date}
-    天気: {w_emoji}, 最高気温: {str_high}℃, 最低気温: {str_low}℃
-    
-    【検索された重要事実（Event & Traffic）】
-    {search_res}
-    
-    【重要指令】
-    1. **ランク判定:** 平日は「C」か「B」。イベントや悪天候需要がある場合のみ「A/S」。
-    2. **文章の品質:** 読みやすく、提案型（〜するとよいでしょう）で記述せよ。
-    3. **職業別アドバイス (taxi):**
-       - **ターゲット:** タクシーの乗客ではなく、**「タクシー運転手（ドライバー）」**に向けて書け。
-       - **内容:** 「どこでお客さんを拾えるか（需要エリア）」「悪天候時の運行注意点」「イベント終了後の配車狙い目」などを具体的に助言せよ。
-    4. **タイムライン詳細:**
-       - **天気:** 朝は「{w_m}」、昼は「{w_d}」、夜は「{w_n}」とせよ。
-       - **気温:** 朝は「{t_m}」、昼は「{t_d}」、夜は「{t_n}」とせよ。
-       - **降水:** 朝は「{r_m}」、昼は「{r_d}」、夜は「{r_n}」とせよ（午前/午後と書くな）。
-    
-    5. **JSON出力:**
-    {{
-        "date": "{full_date}",
-        "is_long_term": false,
-        "rank": "S/A/B/C",
-        "weather_overview": {{ 
-            "condition": "{w_emoji}", 
-            "high": "最高{str_high}℃", "low": "最低{str_low}℃", "rain": "{rain_display}",
-            "warning": "{warning_text}"
-        }},
-        "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n**■Event & Traffic**\\n(検索情報の要約)...\\n\\n**■総括**\\n(分析)...\\n\\n**■推奨戦略**\\n・...", 
-        "timeline": {{
-            "morning": {{ "weather": "{w_m}", "temp": "{t_m}", "rain": "{r_m}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
-            "daytime": {{ "weather": "{w_d}", "temp": "{t_d}", "rain": "{r_d}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
-            "night": {{ "weather": "{w_n}", "temp": "{t_n}", "rain": "{r_n}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }}
-        }}
-    }}
-    """
-    
-    res = call_gemini_json(json_prompt)
-    if res:
         try:
-            j = json.loads(extract_json_block(res))
-            print("OK")
-            return j
-        except: pass
-    
-    print("NG")
-    return None
+            vals = [int(x) for x in r_raw if x != "-" and x != ""]
+            if vals:
+                rain_val = f"{max(vals)}%"
+        except:
+            pass
+    return rain_val
 
-def get_smart_forecast(target_date, long_term_text):
-    date_str = target_date.strftime('%Y-%m-%d')
-    date_display = target_date.strftime('%m月%d日')
+# =========================
+# 休日判定（長期ランク用）
+# =========================
+def base_rank_for_date(target_date):
+    date_str = target_date.strftime("%Y-%m-%d")
+    rank = "C"
+    # 金土はB寄り
+    if target_date.weekday() in (4, 5):
+        rank = "B"
+    # 祝日 or 翌日祝日もB寄り
+    if date_str in HOLIDAYS_2026:
+        rank = "B"
+    next_day = (target_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    if next_day in HOLIDAYS_2026:
+        rank = "B"
+    return rank
+
+# =========================
+# AI生成（1日ぶん：5職業×朝昼夜）
+# =========================
+JOB_KEYS = ["taxi", "delivery", "restaurant", "retail", "hotel"]
+
+def generate_ai_day(
+    area_data,
+    target_date,
+    jma_day_data,
+    warning_text,
+    slot_weather,
+    event_traffic_text
+):
+    """
+    1日分のJSONを一発で生成（検索はしない）
+    - timelineの weather/temp/humidity/rain を時間帯ごとに別にセット
+    - adviceは tax/delivery/restaurant/retail/hotel で分ける
+    """
+    if not API_KEY:
+        return None
+
+    date_str = target_date.strftime("%Y-%m-%d")
+    date_display = target_date.strftime("%m月%d日")
     weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
     full_date = f"{date_display} ({weekday_str})"
-    
-    rank = "C"
-    if target_date.weekday() == 5: rank = "B" 
-    elif target_date.weekday() == 4: rank = "B" 
-    if date_str in HOLIDAYS_2026: rank = "B"
-    next_day = (target_date + timedelta(days=1)).strftime('%Y-%m-%d')
-    if next_day in HOLIDAYS_2026: rank = "B"
+
+    # overview（JMAベース）
+    w_code = (jma_day_data or {}).get("code", "200")
+    w_emoji = get_weather_emoji_jma(w_code)
+
+    today_dt = datetime.now(JST)
+    is_today = (target_date.date() == today_dt.date())
+
+    high, low = decide_high_low(area_data, target_date, jma_day_data or {}, is_today=is_today)
+    rain_display = decide_rain_display(jma_day_data or {})
+
+    # 時間帯天気（Open-Meteo）
+    # slot_weatherが取れない場合はoverviewで埋める
+    if not slot_weather:
+        slot_weather = {
+            "morning": {"weather": w_emoji, "temp": "-", "humidity": "-", "rain": rain_display, "wcode": None},
+            "daytime": {"weather": w_emoji, "temp": "-", "humidity": "-", "rain": rain_display, "wcode": None},
+            "night": {"weather": w_emoji, "temp": "-", "humidity": "-", "rain": rain_display, "wcode": None},
+        }
+
+    # AIに渡す“事実セット”（短く・ブレない）
+    facts = f"""
+[Area]
+{area_data['name']}
+特徴: {area_data.get('feature','')}
+
+[Date]
+{date_str} / {full_date}
+
+[Weather Overview]
+天気: {w_emoji} (JMA code {w_code})
+最高: {high}℃ / 最低: {low}℃（最低気温は予報ベースで必ず考慮）
+降水確率(代表): {rain_display}
+警報注意報: {warning_text}
+
+[Time Slots Weather]
+朝(06-12): {slot_weather['morning']['weather']} / 気温 {slot_weather['morning']['temp']} / 湿度 {slot_weather['morning']['humidity']} / 降水 {slot_weather['morning']['rain']}
+昼(12-18): {slot_weather['daytime']['weather']} / 気温 {slot_weather['daytime']['temp']} / 湿度 {slot_weather['daytime']['humidity']} / 降水 {slot_weather['daytime']['rain']}
+夜(18-24): {slot_weather['night']['weather']} / 気温 {slot_weather['night']['temp']} / 湿度 {slot_weather['night']['humidity']} / 降水 {slot_weather['night']['rain']}
+
+[Event & Traffic Facts]
+{event_traffic_text}
+"""
+
+    # 意思決定テンプレ（固定でブレ抑制）
+    prompt = f"""
+あなたは世界トップクラスの戦略コンサルタントです。
+以下の事実セットから、5つの職業（taxi/delivery/restaurant/retail/hotel）向けに、
+「その職業の今日の意思決定が変わる」具体的な提案を作ってください。
+
+【重要ルール】
+- フェイク禁止。事実セットにない固有名詞は勝手に作らない。
+- 曖昧な場合は「未確認」「可能性」と明記。
+- 結論ファースト。各職業は「今日の打ち手」を短く明確に。
+- 命令口調禁止（〜するとよいでしょう）。
+- ランク判定: 平日は原則B/C寄り。ただし大規模イベント/深刻な交通麻痺が明確ならA/Sも可。
+
+【出力はJSONのみ】
+次のスキーマで出力せよ。
+
+{{
+  "date": "{full_date}",
+  "is_long_term": false,
+  "rank": "S/A/B/C",
+  "weather_overview": {{
+    "condition": "{w_emoji}",
+    "high": "最高{high}℃",
+    "low": "最低{low}℃",
+    "rain": "{rain_display}",
+    "warning": "{warning_text}"
+  }},
+  "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n**■Event & Traffic**\\n(事実セットのEvent&Trafficを要約)\\n\\n**■総括**\\n(地域全体の読み)\\n\\n**■職業別の打ち手（要点）**\\n・タクシー: ...\\n・配送: ...\\n・飲食: ...\\n・小売: ...\\n・ホテル観光: ...",
+  "timeline": {{
+    "morning": {{
+      "weather": "{slot_weather['morning']['weather']}",
+      "temp": "{slot_weather['morning']['temp']}",
+      "humidity": "{slot_weather['morning']['humidity']}",
+      "rain": "{slot_weather['morning']['rain']}",
+      "advice": {{
+        "taxi": "...",
+        "delivery": "...",
+        "restaurant": "...",
+        "retail": "...",
+        "hotel": "..."
+      }}
+    }},
+    "daytime": {{
+      "weather": "{slot_weather['daytime']['weather']}",
+      "temp": "{slot_weather['daytime']['temp']}",
+      "humidity": "{slot_weather['daytime']['humidity']}",
+      "rain": "{slot_weather['daytime']['rain']}",
+      "advice": {{
+        "taxi": "...",
+        "delivery": "...",
+        "restaurant": "...",
+        "retail": "...",
+        "hotel": "..."
+      }}
+    }},
+    "night": {{
+      "weather": "{slot_weather['night']['weather']}",
+      "temp": "{slot_weather['night']['temp']}",
+      "humidity": "{slot_weather['night']['humidity']}",
+      "rain": "{slot_weather['night']['rain']}",
+      "advice": {{
+        "taxi": "...",
+        "delivery": "...",
+        "restaurant": "...",
+        "retail": "...",
+        "hotel": "..."
+      }}
+    }}
+  }},
+  "confidence": 0
+}}
+
+【事実セット】
+{facts}
+"""
+
+    res = call_gemini_json(prompt)
+    if not res:
+        return None
+
+    try:
+        j = json.loads(extract_json_block(res))
+        # safety: 欠けてたら埋める
+        j.setdefault("date", full_date)
+        j.setdefault("is_long_term", False)
+        j.setdefault("rank", "C")
+        j.setdefault("weather_overview", {
+            "condition": w_emoji, "high": f"最高{high}℃", "low": f"最低{low}℃", "rain": rain_display, "warning": warning_text
+        })
+        j.setdefault("confidence", 0)
+        return j
+    except:
+        return None
+
+# =========================
+# 長期（8日目以降）は従来通りテキスト（AI検索はしない）
+# =========================
+def get_long_term_text_safe(area_name):
+    # ここはコスト優先なら「固定文」でも良いが、現状維持でGemini検索を残すなら下記。
+    # ※コストを気にするなら「週1回だけ更新」などにするのが◎
+    prompt = f"""
+エリア: {area_name}
+向こう3ヶ月(2-4月)の気象傾向とイベントをGoogle検索し、
+「〜でしょう。」「〜が予定されています。」という自然な日本語の文章でまとめて。
+JSON形式や辞書形式の出力は禁止。読みやすいMarkdownテキストのみ出力せよ。
+"""
+    res = call_gemini_search(prompt)
+    if not res:
+        return "長期予報データの取得に失敗しました。平年並みの傾向を参考にしてください。"
+    return res
+
+def get_smart_forecast(target_date, long_term_text):
+    date_str = target_date.strftime("%Y-%m-%d")
+    date_display = target_date.strftime("%m月%d日")
+    weekday_str = ["月", "火", "水", "木", "金", "土", "日"][target_date.weekday()]
+    full_date = f"{date_display} ({weekday_str})"
+
+    rank = base_rank_for_date(target_date)
 
     return {
-        "date": full_date, "is_long_term": True, "rank": rank,
-        "weather_overview": { "condition": "☁️", "high": "-", "low": "-", "rain": "-", "warning": "-" },
+        "date": full_date,
+        "is_long_term": True,
+        "rank": rank,
+        "weather_overview": {"condition": "☁️", "high": "-", "low": "-", "rain": "-", "warning": "-"},
         "daily_schedule_and_impact": f"【{date_display}の長期予測】\n\n**■Event & Traffic**\n詳細は直近の予測をご確認ください。\n\n**■長期傾向**\n{long_term_text}",
-        "timeline": None
+        "timeline": None,
+        "confidence": 0
     }
 
-# --- 並列処理ラッパー ---
+# =========================
+# エリア単位の処理
+# =========================
 def process_single_area(item):
     area_key, area_data = item
     print(f"\n📍 {area_data['name']} 開始", flush=True)
+
+    # 予報（JMA）
     daily_db, warning_text = get_jma_forecast_data(area_data["jma_code"])
+
+    # 時間帯別の天気（Open-Meteo）
+    om = fetch_openmeteo_hourly(area_data["lat"], area_data["lon"], days=AI_DAYS)
+
+    # 7日分のEvent&Traffic（検索は1回だけ）
+    facts_by_date = fetch_event_traffic_7days(area_data["name"])
+
+    # 長期テキスト（コスト気になるなら週1更新に変更推奨）
     long_term_text = get_long_term_text_safe(area_data["name"])
-    
+
     area_forecasts = []
     today_dt = datetime.now(JST)
-    for i in range(90):
-        target_date = today_dt + timedelta(days=i)
-        if i < 7: 
-            data = get_ai_advice(area_key, area_data, target_date, daily_db, warning_text)
-            if data: area_forecasts.append(data)
-            else: area_forecasts.append(get_smart_forecast(target_date, long_term_text))
+
+    for i in range(RUN_DAYS):
+        target_date = (today_dt + timedelta(days=i))
+        date_key = target_date.strftime("%Y-%m-%d")
+
+        if i < AI_DAYS:
+            # 今日のJMAデータ
+            day_data = daily_db.get(date_key, {})
+            slot_weather = build_slot_weather(om, target_date)
+
+            et_text = facts_by_date.get(date_key, "特段の検索結果なし")
+
+            print(f"🤖 {area_data['name']} / {date_key} ", end="", flush=True)
+            data = generate_ai_day(
+                area_data=area_data,
+                target_date=target_date,
+                jma_day_data=day_data,
+                warning_text=warning_text,
+                slot_weather=slot_weather,
+                event_traffic_text=et_text
+            )
+            if data:
+                print("OK", flush=True)
+                area_forecasts.append(data)
+            else:
+                print("NG → long_term fallback", flush=True)
+                area_forecasts.append(get_smart_forecast(target_date, long_term_text))
         else:
             area_forecasts.append(get_smart_forecast(target_date, long_term_text))
-    print(f"✅ {area_data['name']} 完了")
+
+    print(f"✅ {area_data['name']} 完了", flush=True)
     return area_key, area_forecasts
 
+# =========================
+# main
+# =========================
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye v4.5 (Driver Advice + Hourly Fix) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
-    
+    print(f"🦅 Eagle Eye v5.0 (SlotWeather+Jobs5+SearchOnce) 起動: {today.strftime('%Y/%m/%d %H:%M')}", flush=True)
+
     master_data = {}
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_single_area, item) for item in TARGET_AREAS.items()]
         for future in as_completed(futures):
             try:
                 key, data = future.result()
                 master_data[key] = data
-            except Exception as e: print(f"Err: {e}")
+            except Exception as e:
+                print(f"Err: {e}", flush=True)
 
     with open("eagle_eye_data.json", "w", encoding="utf-8") as f:
         json.dump(master_data, f, ensure_ascii=False, indent=2)
+
     print("\n✅ 全工程完了", flush=True)
