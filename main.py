@@ -21,8 +21,7 @@ HOLIDAYS_2026 = {
     "2026-10-12", "2026-11-03", "2026-11-23", "2026-11-24"
 }
 
-# --- 戦略的30地点定義 (AMeDASコード追加) ---
-# amedas_code: そのエリアの代表的な観測所コード
+# --- 戦略的30地点定義 ---
 TARGET_AREAS = {
     "hakodate": { "name": "北海道 函館", "jma_code": "014100", "amedas_code": "23411", "lat": 41.7687, "lon": 140.7288, "feature": "観光・夜景・海鮮。冬は雪の影響大。クルーズ船寄港地。" },
     "sapporo": { "name": "北海道 札幌", "jma_code": "016000", "amedas_code": "14163", "lat": 43.0618, "lon": 141.3545, "feature": "北日本最大の歓楽街ススキノ。雪まつり等のイベント。" },
@@ -57,46 +56,50 @@ TARGET_AREAS = {
     "okinawa_naha": { "name": "沖縄 那覇", "jma_code": "471000", "amedas_code": "91197", "lat": 26.2124, "lon": 127.6809, "feature": "国際通り。観光客メイン。台風等の天候影響大。" },
 }
 
-# --- 天気予報コード変換 ---
+# --- 天気予報コード変換 (雪を☃️に修正) ---
 def get_weather_emoji(code):
     try:
         c = int(code)
-        if c in [100, 101, 123, 124]: return "☀️"
-        if c in [102, 103, 104, 105, 106, 107, 108, 110, 111, 112]: return "🌤️"
-        if c in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212]: return "☁️"
-        if 300 <= c < 400: return "☔"
-        if 400 <= c < 500: return "⛄"
-        if c == 0: return "☀️"
-        if c in [1, 2, 3]: return "🌤️"
-        if c in [45, 48]: return "🌫️"
+        # 晴れ系
+        if c in [100, 101, 123, 124, 0]: return "☀️"
+        if c in [102, 103, 104, 105, 106, 107, 108, 110, 111, 112, 1, 2, 3]: return "🌤️"
+        # 曇り系
+        if c in [200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 45, 48]: return "☁️"
+        # 雨系
+        if 300 <= c < 350: return "☔" # 雨
         if c in [51, 53, 55, 61, 63, 65, 80, 81, 82]: return "☔"
-        if c in [71, 73, 75, 77, 85, 86]: return "⛄"
+        # 雪系 (範囲拡大)
+        if 350 <= c < 500: return "☃️" # 雪・みぞれ
+        if c in [71, 73, 75, 77, 85, 86]: return "☃️"
+        # 荒天
         if c >= 95: return "⛈️"
     except: pass
     return "☁️"
 
-# --- AMeDAS 実況値取得 (アメダス連携) ---
+# --- AMeDAS 実況値取得 (今日0時〜現在のMax/Minを算出) ---
 def get_amedas_daily_stats(amedas_code):
     """
     今日0時から現在までのアメダス実測値を取得し、本当の最高/最低気温を算出する。
+    1時間ごとのデータ(_1h.json)を使うことで、過去の気温を確実に拾う。
     """
     today_str = datetime.now(JST).strftime('%Y%m%d')
-    url = f"https://www.jma.go.jp/bosai/amedas/data/point/{amedas_code}/{today_str}.json"
+    # 1時間ごとの履歴データ
+    url = f"https://www.jma.go.jp/bosai/amedas/data/point/{amedas_code}/{today_str}_1h.json"
     
     try:
-        with urllib.request.urlopen(url, timeout=5) as res:
+        with urllib.request.urlopen(url, timeout=10) as res:
             data = json.loads(res.read().decode('utf-8'))
             
-            # tempキーの値リスト: [気温, フラグ]
+            # dataは { "01": {"temp": [10.5, 0]}, "02": ... } の形式
             temps = []
-            for k, v in data.items():
-                if "temp" in v and v["temp"][0] is not None:
-                    temps.append(v["temp"][0])
+            for hour, vals in data.items():
+                if "temp" in vals and vals["temp"][0] is not None:
+                    temps.append(vals["temp"][0])
             
             if temps:
                 return {"max": max(temps), "min": min(temps)}
     except Exception as e:
-        # print(f"AMeDAS Error: {e}") 
+        # print(f"AMeDAS Error: {e}")
         pass
     
     return None
@@ -128,16 +131,6 @@ def get_jma_forecast_data(area_code):
             for i, d in enumerate(dates_r):
                 date_key = d.split("T")[0]
                 if date_key not in daily_db: continue
-                
-                time_part = d.split("T")[1].split("+")[0]
-                hour = int(time_part.split(":")[0])
-                if "rain_hourly" not in daily_db[date_key]: daily_db[date_key]["rain_hourly"] = {}
-                
-                # 時間帯別 (午前/午後と書かず、%数値のみ)
-                if 5 <= hour < 11: daily_db[date_key]["rain_hourly"]["morning"] = pops[i] + "%"
-                elif 11 <= hour < 17: daily_db[date_key]["rain_hourly"]["day"] = pops[i] + "%"
-                elif 17 <= hour <= 23: daily_db[date_key]["rain_hourly"]["night"] = pops[i] + "%"
-                
                 if "rain_raw" not in daily_db[date_key]: daily_db[date_key]["rain_raw"] = []
                 daily_db[date_key]["rain_raw"].append(pops[i])
 
@@ -148,16 +141,6 @@ def get_jma_forecast_data(area_code):
             for i, d in enumerate(dates_t):
                 date_key = d.split("T")[0]
                 if date_key not in daily_db: continue
-                
-                time_part = d.split("T")[1].split("+")[0]
-                hour = int(time_part.split(":")[0])
-                if "temp_hourly" not in daily_db[date_key]: daily_db[date_key]["temp_hourly"] = {}
-                
-                # 時間に近い気温
-                if 8 <= hour <= 10: daily_db[date_key]["temp_hourly"]["morning"] = temps[i]
-                elif 14 <= hour <= 16: daily_db[date_key]["temp_hourly"]["day"] = temps[i]
-                elif 20 <= hour <= 22: daily_db[date_key]["temp_hourly"]["night"] = temps[i]
-
                 if "temp_raw" not in daily_db[date_key]: daily_db[date_key]["temp_raw"] = []
                 daily_db[date_key]["temp_raw"].append(temps[i])
 
@@ -179,8 +162,6 @@ def get_jma_forecast_data(area_code):
                     val = w_pops[i] if i < len(w_pops) else "-"
                     if val != "-": 
                         if "rain_raw" not in daily_db[date_key]: daily_db[date_key]["rain_raw"] = [val]
-                        if "rain_hourly" not in daily_db[date_key]: 
-                            daily_db[date_key]["rain_hourly"] = {"morning": val+"%", "day": val+"%", "night": val+"%"}
                     
                     t_min_val = w_min[i] if i < len(w_min) and w_min[i]!="" else None
                     t_max_val = w_max[i] if i < len(w_max) and w_max[i]!="" else None
@@ -263,6 +244,7 @@ def get_ai_advice(area_key, area_data, target_date, daily_db, warning_text):
     if not API_KEY: return None
 
     today_dt = datetime.now(JST)
+    # 日付比較 (時間情報を除外)
     is_today = (target_date.date() == today_dt.date())
     
     date_str = target_date.strftime('%Y-%m-%d')
@@ -274,7 +256,7 @@ def get_ai_advice(area_key, area_data, target_date, daily_db, warning_text):
     w_code = day_data.get("code", "200")
     w_emoji = get_weather_emoji(w_code)
     
-    # --- 【ハイブリッド気温ロジック】 ---
+    # --- 【最強の気温決定ロジック】 ---
     summary = day_data.get("temp_summary", {})
     high_val = summary.get("max")
     low_val = summary.get("min")
@@ -286,101 +268,106 @@ def get_ai_advice(area_key, area_data, target_date, daily_db, warning_text):
         try: valid_t.append(float(x))
         except: pass
     
-    if not high_val or not low_val:
-        if valid_t:
-            if not high_val: high_val = max(valid_t)
-            if not low_val: low_val = min(valid_t)
+    if valid_t:
+        if not high_val: high_val = max(valid_t)
+        if not low_val: low_val = min(valid_t)
 
-    # (2) 今日なら、アメダス実測値で補完・上書き (救済措置)
+    # (2) アメダス実測値で補完・上書き (今日のみ)
     if is_today:
-        amedas_stats = get_amedas_daily_stats(area_data["amedas_code"])
+        amedas_stats = get_amedas_daily_stats(area_data.get("amedas_code", ""))
         if amedas_stats:
-            # 予報値がない、または予報値がおかしい(同値)場合、または実測の方が極端な場合
-            # 特に「最低気温」は朝の実測を使うべき
             actual_min = amedas_stats["min"]
             actual_max = amedas_stats["max"]
             
-            # 最低気温: 予報がない or 予報が高い(現在の気温になっている)場合、実測を採用
+            # 最低気温: 予報がない or 予報が高すぎる(現在の気温になっている)場合、実測の最低を採用
             if low_val is None or (low_val > actual_min): 
                 low_val = actual_min
             
-            # 最高気温: 予報がない or 実測の方が高い場合(気温上昇中)、実測を採用
+            # 最高気温: 予報がない or 実測の方が高い場合、実測の最高を採用
             if high_val is None or (actual_max > high_val):
                 high_val = actual_max
 
-    # 文字列化 (Noneなら "-" だが、アメダス連携でほぼ回避されるはず)
-    high_temp = f"{high_val}℃" if high_val is not None else "-"
-    low_temp = f"{low_val}℃" if low_val is not None else "-"
+    # 文字列化 (℃除去)
+    str_high = f"{high_val}" if high_val is not None else "-"
+    str_low = f"{low_val}" if low_val is not None else "-"
     
+    # 万が一、それでも同じ値で "-" でない場合 (アメダス失敗時など)
+    if str_high == str_low and str_high != "-":
+        # 暫定的に最低気温を空にするか、AIに推測させる
+        str_low = "-" 
+
     # --- 降水確率 ---
     r_raw = day_data.get("rain_raw", [])
-    if len(r_raw) >= 2:
-        rain_display = f"午前{r_raw[0]}% / 午後{r_raw[1]}%"
-    elif len(r_raw) == 1:
-        rain_display = f"{r_raw[0]}%"
-    else:
-        rain_display = "-%"
-
-    # --- タイムライン詳細 (時間帯別) ---
-    r_hourly = day_data.get("rain_hourly", {})
-    r_m = r_hourly.get("morning", "-")
-    r_d = r_hourly.get("day", "-")
-    r_n = r_hourly.get("night", "-")
-    # 欠損時は全体値で埋める
-    if r_m == "-" and len(r_raw) >= 1: r_m = f"{r_raw[0]}%"
-    if r_d == "-" and len(r_raw) >= 1: r_d = f"{r_raw[0]}%"
-    if r_n == "-" and len(r_raw) >= 1: r_n = f"{r_raw[0]}%"
-
-    # タイムライン気温 (時系列 or 代表値)
-    t_hourly = day_data.get("temp_hourly", {})
-    t_m = f"{t_hourly.get('morning', high_temp)}℃"
-    t_d = f"{t_hourly.get('day', high_temp)}℃"
-    t_n = f"{t_hourly.get('night', low_temp)}℃"
+    rain_val = "-"
+    if r_raw:
+        # 最大値を採用してリスク表示
+        try: 
+            vals = [int(x) for x in r_raw if x != "-"]
+            if vals: rain_val = f"{max(vals)}%"
+        except: pass
+    
+    # 表示用文字列
+    rain_display = rain_val
 
     print(f"🤖 {area_data['name']} / {full_date} ", end="", flush=True)
 
     print("🔍", end="", flush=True)
+    # 【修正】ニュース・交通情報を強力に検索
     search_prompt = f"""
     エリア: {area_data['name']}
     日付: {date_str}
-    このエリアの、この日の具体的なイベント、交通規制、混雑予想を検索して。
+    
+    以下のキーワードでニュースや運行情報を徹底的に検索せよ:
+    「{area_data['name']} 交通情報」「{area_data['name']} イベント」「{area_data['name']} 運行状況」「{area_data['name']} 通行止め」「{area_data['name']} 大雪」「{area_data['name']} 遅延」
+    
+    特に、悪天候によるJR、地下鉄、バス、飛行機の運休・遅延情報、道路の通行止め情報を最優先で探せ。
+    イベントは開催中か、中止かを含めて探せ。
     """
-    search_res = call_gemini_search(search_prompt) or "特になし"
+    search_res = call_gemini_search(search_prompt) or "特段の検索結果なし"
 
     print("📝", end="", flush=True)
     
+    # タイムライン用気温 (最高/最低 を一律セット)
+    temp_full_str = f"最高{str_high}℃ / 最低{str_low}℃"
+    
+    # プロンプト更新
     json_prompt = f"""
-    あなたは世界最高の戦略コンサルタントです。指定した職業の人が、仕事の参考になるように考え、アドバイスを作成してください。
+    あなたは世界屈指の戦略コンサルタントです。
+    指定の職業のユーザーが、仕事の意思決定において最も頼りにするような、正確で洞察に満ちたアドバイスを提供してください。
     
     【条件】
     エリア: {area_data['name']}
     日時: {full_date}
-    天気: {w_emoji}, 高: {high_temp}, 低: {low_temp}, 降水: {rain_display}
+    天気: {w_emoji}, 最高気温: {str_high}℃, 最低気温: {str_low}℃, 降水確率: {rain_display}
     
-    【検索結果】
+    【検索された重要事実（Event & Traffic）】
     {search_res}
     
     【重要指令】
-    1. **ランク判定:** 平日は原則「C」か「B」。イベントや悪天候需要がある場合のみ「A/S」。
-    2. **文章化:** 必ず自然な日本語の文章で記述せよ。
-    3. **タイムライン詳細:**
-       - **降水確率:** 「午前/午後」と書くな。その時間帯の確率単体（例:「{r_m}」）のみを記載せよ。
-       - **気温:** 朝は「{t_m}」、昼は「{t_d}」、夜は「{t_n}」と記載せよ。
-    4. **JSON出力:**
+    1. **ランク判定:** 平日は原則「C」か「B」。ただし、上記検索結果で「大規模イベント」や「深刻な交通麻痺（大雪など）」が確認された場合は、需要増減を加味して「A」または「S」とせよ。
+    2. **文章の品質:** - ユーザー目線で、読みやすく、論理的な文章にせよ。
+       - 重要な事実は**太文字**や色を活用せずとも伝わるよう、段落を分けて記述せよ。
+       - 命令口調（〜してください）は禁止。「〜するとよいでしょう」「〜が推奨されます」という提案型にせよ。
+    3. **Event & Traffic欄:** 検索結果にある具体的な交通トラブル（運休、通行止め）やイベント名を必ず記載せよ。フェイクニュースは書くな。
+    4. **タイムライン詳細:**
+       - **降水確率:** 「午前/午後」と書くな。「30%」のように単一の数値のみ書け。
+       - **気温:** 朝・昼・夜すべての欄に「{temp_full_str}」と記載せよ（ユーザーが1日の寒暖差を常に意識できるようにするため）。
+    
+    5. **JSON出力:**
     {{
         "date": "{full_date}",
         "is_long_term": false,
         "rank": "S/A/B/C",
         "weather_overview": {{ 
             "condition": "{w_emoji}", 
-            "high": "{high_temp}", "low": "{low_temp}", "rain": "{rain_display}",
+            "high": "最高{str_high}℃", "low": "最低{str_low}℃", "rain": "{rain_display}",
             "warning": "{warning_text}"
         }},
-        "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n**■Event & Traffic**\\n(検索結果)...\\n\\n**■総括**\\n(結論)...\\n\\n**■推奨戦略**\\n・...", 
+        "daily_schedule_and_impact": "【{date_display}のレポート】\\n\\n**■Event & Traffic**\\n(検索された交通・イベント情報を要約)...\\n\\n**■総括**\\n(コンサルタントとしての分析)...\\n\\n**■推奨戦略**\\n・(具体的なアクション)...", 
         "timeline": {{
-            "morning": {{ "weather": "{w_emoji}", "temp": "{t_m}", "rain": "{r_m}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
-            "daytime": {{ "weather": "{w_emoji}", "temp": "{t_d}", "rain": "{r_d}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
-            "night": {{ "weather": "{w_emoji}", "temp": "{t_n}", "rain": "{r_n}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }}
+            "morning": {{ "weather": "{w_emoji}", "temp": "{temp_full_str}", "rain": "{rain_display}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
+            "daytime": {{ "weather": "{w_emoji}", "temp": "{temp_full_str}", "rain": "{rain_display}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }},
+            "night": {{ "weather": "{w_emoji}", "temp": "{temp_full_str}", "rain": "{rain_display}", "advice": {{ "taxi": "...", "restaurant": "...", "hotel": "...", "shop": "...", "logistics": "...", "conveni": "...", "construction": "...", "delivery": "...", "security": "..." }} }}
         }}
     }}
     """
@@ -409,10 +396,12 @@ def get_smart_forecast(target_date, long_term_text):
     next_day = (target_date + timedelta(days=1)).strftime('%Y-%m-%d')
     if next_day in HOLIDAYS_2026: rank = "B"
 
+    # カレンダー用のアドバイス欄にイベント情報を入れるためのプレースホルダー
+    # AI生成ではないため、ここには具体的なイベントは入らないが、フォーマットは合わせる
     return {
         "date": full_date, "is_long_term": True, "rank": rank,
         "weather_overview": { "condition": "☁️", "high": "-", "low": "-", "rain": "-", "warning": "-" },
-        "daily_schedule_and_impact": f"【{date_display}の長期予測】\n\n{long_term_text}",
+        "daily_schedule_and_impact": f"【{date_display}の長期予測】\n\n**■Event & Traffic**\n詳細は直近の予測をご確認ください。\n\n**■長期傾向**\n{long_term_text}",
         "timeline": None
     }
 
@@ -438,7 +427,7 @@ def process_single_area(item):
 
 if __name__ == "__main__":
     today = datetime.now(JST)
-    print(f"🦅 Eagle Eye v3.2 (AMeDAS Hybrid) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
+    print(f"🦅 Eagle Eye v4.0 (AMeDAS+Pro) 起動: {today.strftime('%Y/%m/%d')}", flush=True)
     
     master_data = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
