@@ -13,8 +13,10 @@ dependencies:
   http: ^0.13.6
   intl: ^0.18.1
   table_calendar: ^3.0.9
-  # ★ここに追加！スマホに設定を保存する機能
+  # ★スマホに設定を保存する機能
   shared_preferences: ^2.2.2
+  # ★外部ブラウザでリンクを開く
+  url_launcher: ^6.2.6
 
 dev_dependencies:
   flutter_test:
