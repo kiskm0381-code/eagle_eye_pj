@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -123,6 +124,46 @@ Future<void> openExternalUrl(String url) async {
   final ok = await launchUrl(uri, mode: LaunchMode.platformDefault);
   if (!ok) {
     throw 'Could not launch $url';
+  }
+}
+
+// --- 小物ユーティリティ：温度を数字にする ---
+double? _extractTempNumber(dynamic v) {
+  if (v == null) return null;
+  final s = v.toString();
+  final m = RegExp(r'(-?\d+)').firstMatch(s);
+  if (m == null) return null;
+  return double.tryParse(m.group(1)!);
+}
+
+String _formatTempC(double? v) {
+  if (v == null) return "-";
+  return "${v.round()}°C";
+}
+
+Color _rankColor(String rank) {
+  switch (rank) {
+    case "S":
+      return AppColors.rankS;
+    case "A":
+      return AppColors.rankA;
+    case "B":
+      return AppColors.rankB;
+    default:
+      return AppColors.rankC;
+  }
+}
+
+String _rankText(String rank) {
+  switch (rank) {
+    case "S":
+      return "激混み";
+    case "A":
+      return "混雑";
+    case "B":
+      return "普通";
+    default:
+      return "閑散";
   }
 }
 
@@ -286,14 +327,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
               const Text("Eagle Eyeへようこそ", style: TextStyle(fontSize: 16, color: Colors.grey)),
               const SizedBox(height: 30),
 
-              // ✅ エリアは型安全に AreaData? を扱う
               _areaDropdown(),
-
               const SizedBox(height: 20),
-
-              // ✅ 年代は String? を扱う
               _ageDropdown(),
-
               const SizedBox(height: 20),
 
               const Text("職業", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -400,39 +436,99 @@ class _MainContainerPageState extends State<MainContainerPage> {
     _fetchData();
   }
 
+  Future<void> _logAdmin(String msg) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = "admin_log_${DateTime.now().toIso8601String()}";
+      await prefs.setString(key, msg);
+    } catch (_) {}
+  }
+
+  bool _isValidAreaData(Map<String, dynamic> allData, String areaId) {
+    final v = allData[areaId];
+    if (v == null) return false;
+    if (v is! List) return false;
+    if (v.isEmpty) return false;
+    return true;
+  }
+
+  Future<Map<String, dynamic>?> _fetchAllJsonWithRetry() async {
+    // URL候補（rawが詰まった/地域だけ欠けたときに備えてミラー）
+    final baseUrls = <String>[
+      "https://raw.githubusercontent.com/eagle-eye-official/eagle_eye_pj/main/eagle_eye_data.json",
+      "https://cdn.jsdelivr.net/gh/eagle-eye-official/eagle_eye_pj@main/eagle_eye_data.json",
+    ];
+
+    const maxAttempts = 3;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      for (final base in baseUrls) {
+        final t = DateTime.now().millisecondsSinceEpoch;
+        final url = "$base?t=$t&a=$attempt";
+        try {
+          await _logAdmin("FETCH attempt=$attempt url=$base area=${currentArea.id}");
+          final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
+          if (response.statusCode != 200) {
+            await _logAdmin("FETCH non-200 status=${response.statusCode} url=$base");
+            continue;
+          }
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is! Map<String, dynamic>) {
+            await _logAdmin("FETCH invalid json type url=$base");
+            continue;
+          }
+          // 「該当エリアが空/欠落」も失敗扱い → リトライに回す
+          if (!_isValidAreaData(decoded, currentArea.id)) {
+            await _logAdmin("FETCH ok but area_missing area=${currentArea.id} url=$base");
+            continue;
+          }
+          return decoded;
+        } catch (e) {
+          await _logAdmin("FETCH exception attempt=$attempt url=$base err=$e");
+          // 次URL or 次attemptへ
+          continue;
+        }
+      }
+      // attempt間の待機（軽いバックオフ）
+      await Future.delayed(Duration(milliseconds: 450 * attempt));
+    }
+    return null;
+  }
+
   Future<void> _fetchData() async {
     setState(() {
       isLoading = true;
       errorMessage = null;
     });
-    final t = DateTime.now().millisecondsSinceEpoch;
-    final url = "https://raw.githubusercontent.com/eagle-eye-official/eagle_eye_pj/main/eagle_eye_data.json?t=$t";
 
-    try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> allData = jsonDecode(utf8.decode(response.bodyBytes));
-        if (mounted) {
-          setState(() {
-            currentAreaDataList = allData[currentArea.id] ?? [];
-            isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            errorMessage = "データ取得エラー: ${response.statusCode}";
-            isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
+    final allData = await _fetchAllJsonWithRetry();
+    if (allData == null) {
       if (mounted) {
         setState(() {
-          errorMessage = "接続エラー: $e";
+          errorMessage = "データ取得に失敗しました（通信/データ欠落）。\n電波状況を確認して再試行してください。";
           isLoading = false;
+          currentAreaDataList = [];
         });
       }
+      return;
+    }
+
+    final list = allData[currentArea.id];
+    if (list is! List || list.isEmpty) {
+      if (mounted) {
+        setState(() {
+          errorMessage = "データは取得できましたが、エリア「${currentArea.name}」の情報が見つかりませんでした。";
+          isLoading = false;
+          currentAreaDataList = [];
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        currentAreaDataList = List<dynamic>.from(list);
+        isLoading = false;
+      });
     }
   }
 
@@ -519,7 +615,7 @@ class DashboardPage extends StatelessWidget {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
           const SizedBox(height: 20),
-          Text(errorMessage!, style: const TextStyle(color: Colors.grey)),
+          Text(errorMessage!, style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center),
           const SizedBox(height: 20),
           ElevatedButton(onPressed: onRetry, child: const Text("再読み込み")),
         ]),
@@ -545,12 +641,14 @@ class DashboardPage extends StatelessWidget {
               _buildFactsCard(dayData),
               const SizedBox(height: 12),
               _buildPeakCard(dayData, job),
+              const SizedBox(height: 12),
+              _buildMyActionCard(dayData, job),
               const SizedBox(height: 18),
               _buildEventTrafficInfo(dayData),
               const SizedBox(height: 20),
               _buildTimeline(dayData, job),
               const SizedBox(height: 20),
-              _buildStrategyReport(dayData),
+              _buildStrategyReport(dayData, job),
               const SizedBox(height: 20),
             ],
           ),
@@ -572,29 +670,56 @@ class DashboardPage extends StatelessWidget {
     ]);
   }
 
-  Widget _buildRankCard(Map<String, dynamic> data) {
-    final rank = data['rank'] ?? "C";
-    final w = data['weather_overview'] ?? {};
-    final condition = w['condition'] ?? "☁️";
-    final rain = w['rain'] ?? "-";
-    final high = w['high'] ?? "-";
-    final low = w['low'] ?? "-";
-    final warning = w['warning'] ?? "特になし";
+  // 日次の最高/最低を「weather_overview or timelineから補完」して作る
+  Map<String, String> _resolveDailyHighLow(Map<String, dynamic> data) {
+    final w = (data['weather_overview'] ?? {}) as Map;
+    final highStr = w['high'];
+    final lowStr = w['low'];
 
-    Color color = AppColors.rankC;
-    String text = "閑散";
-    if (rank == "S") {
-      color = AppColors.rankS;
-      text = "激混み";
+    double? hi = _extractTempNumber(highStr);
+    double? lo = _extractTempNumber(lowStr);
+
+    // どちらか欠ける、または同値なら timeline から補完
+    if (hi == null || lo == null || hi == lo) {
+      final timeline = data['timeline'];
+      final temps = <double>[];
+      if (timeline is Map) {
+        for (final key in ['morning', 'daytime', 'night']) {
+          final slot = timeline[key];
+          if (slot is Map<String, dynamic>) {
+            final th = _extractTempNumber(slot['high'] ?? slot['temp_high'] ?? slot['max']);
+            final tl = _extractTempNumber(slot['low'] ?? slot['temp_low'] ?? slot['min']);
+            if (th != null) temps.add(th);
+            if (tl != null) temps.add(tl);
+
+            // それでも無ければ temp単体から拾う
+            final t = _extractTempNumber(slot['temp']);
+            if (t != null) temps.add(t);
+          }
+        }
+      }
+      if (temps.isNotEmpty) {
+        hi = temps.reduce(max);
+        lo = temps.reduce(min);
+      }
     }
-    if (rank == "A") {
-      color = AppColors.rankA;
-      text = "混雑";
-    }
-    if (rank == "B") {
-      color = AppColors.rankB;
-      text = "普通";
-    }
+
+    final hiOut = hi == null ? (highStr?.toString() ?? "-") : "最高${_formatTempC(hi)}";
+    final loOut = lo == null ? (lowStr?.toString() ?? "-") : "最低${_formatTempC(lo)}";
+    return {"high": hiOut, "low": loOut};
+  }
+
+  Widget _buildRankCard(Map<String, dynamic> data) {
+    final rank = (data['rank'] ?? "C").toString();
+    final w = (data['weather_overview'] ?? {}) as Map;
+    final condition = w['condition']?.toString() ?? "☁️";
+    final rain = w['rain']?.toString() ?? "-";
+    final warning = w['warning']?.toString() ?? "特になし";
+
+    final color = _rankColor(rank);
+    final text = _rankText(rank);
+
+    final hl = _resolveDailyHighLow(data);
 
     return Container(
       width: double.infinity,
@@ -632,11 +757,13 @@ class DashboardPage extends StatelessWidget {
             children: [
               Column(children: [
                 const Icon(Icons.thermostat, color: Colors.white, size: 28),
-                Text(high, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                Text(low, style: const TextStyle(fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(hl["high"] ?? "-", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(hl["low"] ?? "-", style: const TextStyle(fontSize: 14)),
               ]),
               Column(children: [
                 const Icon(Icons.umbrella, color: Colors.white, size: 28),
+                const SizedBox(height: 6),
                 Text(rain, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ]),
             ],
@@ -744,6 +871,84 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
+  // “提案型”の補助（データが薄い時でも「今日の一手」を出す）
+  Widget _buildMyActionCard(Map<String, dynamic> data, JobData job) {
+    final rank = (data['rank'] ?? "C").toString();
+    final w = (data['weather_overview'] ?? {}) as Map;
+    final warning = w['warning']?.toString() ?? "特になし";
+    final rain = w['rain']?.toString() ?? "";
+
+    final bullets = <String>[];
+
+    if (rank == "S" || rank == "A") {
+      bullets.add("需要増を前提に“待機位置”を先に確保（駅/商業施設/ホテル動線）。");
+      bullets.add("混雑で遅延が出るので、到着見込みの説明テンプレを用意。");
+    } else if (rank == "B") {
+      bullets.add("ピーク時間に合わせて稼働を寄せ、その他は休憩や補給に回す。");
+    } else {
+      bullets.add("需要が薄い前提で、移動コストを抑え“短距離の確度”を優先。");
+    }
+
+    if (warning != "特になし") {
+      bullets.add("⚠️ 注意情報あり：安全優先で行動（装備/迂回/運休前提の代替案）。");
+    }
+
+    if (rain.contains("%")) {
+      final p = int.tryParse(RegExp(r'(\d+)').firstMatch(rain)?.group(1) ?? "");
+      if (p != null && p >= 50) {
+        bullets.add("降水確率高め：滑り止め/防水/遅延前提で“早め行動”に切替。");
+      }
+    }
+
+    // 職業別の最後のひと押し
+    switch (job.id) {
+      case "taxi":
+        bullets.add("タクシー：主要駅・病院・ホテルの“流入動線”に寄せる。");
+        break;
+      case "restaurant":
+        bullets.add("飲食店：仕込みと提供スピード優先、テイクアウト導線を明確化。");
+        break;
+      case "hotel":
+        bullets.add("ホテル：欠航/運休客の延泊需要に備え、柔軟な延長対応を準備。");
+        break;
+      case "delivery":
+      case "logistics":
+        bullets.add("配送：到着遅延を前提に顧客連絡を早める（不在率低下）。");
+        break;
+      case "conveni":
+        bullets.add("コンビニ：欠品しやすい主力（飲料/即食/カイロ）を前倒し補充。");
+        break;
+      default:
+        bullets.add("${job.label}：安全と効率の両立で“できる範囲を最大化”。");
+        break;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.accent.withOpacity(0.35)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [
+          Icon(Icons.assistant, color: AppColors.accent),
+          SizedBox(width: 8),
+          Text("今日の一手（提案）", style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 10),
+        ...bullets.take(4).map((t) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("•  ", style: TextStyle(color: Colors.white70, height: 1.4)),
+                Expanded(child: Text(t, style: const TextStyle(color: Colors.white70, height: 1.4))),
+              ]),
+            )),
+      ]),
+    );
+  }
+
   Widget _buildEventTrafficInfo(Map<String, dynamic> data) {
     final info = data['daily_schedule_and_impact'] as String?;
     if (info == null) return const SizedBox.shrink();
@@ -797,16 +1002,39 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
+  String _timeTempRangeText(Map<String, dynamic> slot) {
+    // 優先：high/low, temp_high/temp_low, max/min
+    final hi = _extractTempNumber(slot['high'] ?? slot['temp_high'] ?? slot['max']);
+    final lo = _extractTempNumber(slot['low'] ?? slot['temp_low'] ?? slot['min']);
+
+    if (hi != null || lo != null) {
+      final hiStr = hi == null ? "-" : _formatTempC(hi);
+      final loStr = lo == null ? "-" : _formatTempC(lo);
+      return "最高$hiStr / 最低$loStr";
+    }
+
+    // 次点：temp_range みたいな文字列
+    final tr = slot['temp_range'];
+    if (tr != null) return tr.toString();
+
+    // 最後：temp単体
+    final t = slot['temp'];
+    if (t != null && t.toString().trim().isNotEmpty) {
+      return "気温 ${t.toString()}";
+    }
+    return "気温 -";
+  }
+
   Widget _timeSlot(String label, Map<String, dynamic>? slot, JobData job) {
     if (slot == null) return const SizedBox.shrink();
     final adviceMap = slot['advice'] ?? {};
     final myAdvice = adviceMap[job.id] ?? "特になし";
     final emoji = slot['weather'] ?? "";
-    final temp = slot['temp'] ?? "";
     final rain = slot['rain'] ?? "";
     final humidity = slot['humidity'] ?? "-";
+    final humidityStr = humidity.toString().trim();
 
-    final humidityStr = humidity.toString().trim(); // ✅ trimOffer() を排除
+    final tempRangeText = _timeTempRangeText(slot);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -819,17 +1047,17 @@ class DashboardPage extends StatelessWidget {
             children: [
               Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.primary)),
               const Spacer(),
-              Text(emoji, style: const TextStyle(fontSize: 20)),
+              Text(emoji.toString(), style: const TextStyle(fontSize: 20)),
               const SizedBox(width: 12),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Row(children: [
                   const Icon(Icons.thermostat, size: 14, color: Colors.grey),
-                  Text(temp, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text(tempRangeText, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 ]),
                 if (rain != "-")
                   Row(children: [
                     const Icon(Icons.water_drop, size: 14, color: Colors.blueAccent),
-                    Text(rain, style: const TextStyle(fontSize: 12)),
+                    Text(rain.toString(), style: const TextStyle(fontSize: 12)),
                   ]),
                 if (humidityStr.isNotEmpty && humidityStr != "-")
                   Row(children: [
@@ -839,13 +1067,13 @@ class DashboardPage extends StatelessWidget {
               ]),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(job.icon, size: 18, color: Colors.grey),
               const SizedBox(width: 8),
-              Expanded(child: Text(myAdvice, style: const TextStyle(fontSize: 14, height: 1.4))),
+              Expanded(child: Text(myAdvice.toString(), style: const TextStyle(fontSize: 14, height: 1.4))),
             ],
           ),
         ],
@@ -853,9 +1081,53 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildStrategyReport(Map<String, dynamic> data) {
-    final info = data['daily_schedule_and_impact'] as String?;
-    if (info == null || info.isEmpty) return const SizedBox.shrink();
+  // 職業別の打ち手（要点）を「選択職業だけ」に絞って表示する
+  String _filterJobSectionOnly(String src, JobData job) {
+    // job.label を含む行だけ拾う（例： "・タクシー："）
+    final lines = src.split('\n');
+    final out = <String>[];
+    bool inJobSection = false;
+
+    for (final line in lines) {
+      final t = line.trimRight();
+
+      // セクション開始
+      if (t.contains("職業別の打ち手")) {
+        inJobSection = true;
+        out.add(line);
+        continue;
+      }
+
+      // 次のセクションに入ったら終了
+      if (inJobSection && t.contains("**") && !t.contains("職業別の打ち手")) {
+        inJobSection = false;
+      }
+
+      if (!inJobSection) {
+        out.add(line);
+        continue;
+      }
+
+      // 職業別の打ち手の中：該当職業だけ残す
+      if (t.startsWith("・") && t.contains("：")) {
+        if (t.contains(job.label)) {
+          out.add(line);
+        }
+      } else if (t.isEmpty) {
+        // 余計な空行は少しだけ残す
+        out.add(line);
+      }
+    }
+
+    return out.join('\n');
+  }
+
+  Widget _buildStrategyReport(Map<String, dynamic> data, JobData job) {
+    final raw = data['daily_schedule_and_impact'] as String?;
+    if (raw == null || raw.isEmpty) return const SizedBox.shrink();
+
+    // ここで「職業別の打ち手」を絞る
+    final info = _filterJobSectionOnly(raw, job);
 
     final dateRaw = data['date'].toString();
     final dateClean = dateRaw.split(' ')[0].replaceAll(RegExp(r'\d{4}年'), '');
@@ -1213,12 +1485,12 @@ class _SimpleRankCard extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          Text(rank, style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: color)),
+          Text(rank.toString(), style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: color)),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(w['condition'] ?? "", style: const TextStyle(fontSize: 24)),
+            Text(w['condition']?.toString() ?? "", style: const TextStyle(fontSize: 24)),
             const SizedBox(height: 4),
-            Text(w['high'] ?? "-", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            Text(w['low'] ?? "-", style: const TextStyle(fontSize: 12)),
+            Text(w['high']?.toString() ?? "-", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            Text(w['low']?.toString() ?? "-", style: const TextStyle(fontSize: 12)),
           ]),
         ],
       ),
@@ -1324,7 +1596,7 @@ class ProfilePage extends StatelessWidget {
 
   void _showAdminDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys().where((k) => k.startsWith('admin_log_'));
+    final keys = prefs.getKeys().where((k) => k.startsWith('admin_log_')).toList()..sort();
     String logText = "";
     for (var k in keys) {
       logText += "${prefs.getString(k)}\n";
