@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -6,6 +7,8 @@ import 'package:flutter/services.dart' show rootBundle;
 /// Eagle Eye - main.dart
 /// - assets/eagle_eye_data.json を読み込み
 /// - main.py(v5.1)の新フィールドに対応
+/// - children内にfinalを書かない（Webビルドエラー修正）
+/// - 降水/湿度の表示改善、10%丸め、文言改善
 /// ===============================
 
 void main() {
@@ -251,6 +254,43 @@ class EagleEyeRepo {
 }
 
 /// ===============================
+/// Helpers
+/// ===============================
+
+int? _extractPercent(String s) {
+  final m = RegExp(r'(-?\d+)').firstMatch(s);
+  if (m == null) return null;
+  return int.tryParse(m.group(1)!);
+}
+
+String _roundTo10Percent(String raw) {
+  final p = _extractPercent(raw);
+  if (p == null) return raw.trim().isEmpty ? '-' : raw;
+  final r = ((p / 10).round() * 10).clamp(0, 100);
+  return '$r%';
+}
+
+String _buildRainLine(WeatherOverview w) {
+  final am = (w.rainAm ?? '').trim();
+  final pm = (w.rainPm ?? '').trim();
+  final night = (w.rainNight ?? '').trim();
+
+  // 新フィールド優先（10%丸め）
+  if (am.isNotEmpty || pm.isNotEmpty || night.isNotEmpty) {
+    final parts = <String>[];
+    if (am.isNotEmpty) parts.add('午前${_roundTo10Percent(am)}');
+    if (pm.isNotEmpty) parts.add('午後${_roundTo10Percent(pm)}');
+    if (night.isNotEmpty) parts.add('夜${_roundTo10Percent(night)}');
+    return parts.join(' / ');
+  }
+
+  // 旧rain互換（中の%だけ丸めたいが、形式が自由なので最低限）
+  final r = w.rain.trim();
+  if (r.isEmpty) return '-';
+  return r;
+}
+
+/// ===============================
 /// UI
 /// ===============================
 
@@ -286,6 +326,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         _areaKey = keys.isNotEmpty ? keys.first : null;
         _dayIndex = 0;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       setState(() {
@@ -334,6 +375,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
     final day = list[_dayIndex.clamp(0, list.length - 1)];
 
+    // ✅ children内にfinalを書かない（ここで先に計算）
+    final taxiPeaks = (day.peakWindows['taxi'] ?? '').trim();
+    final taxiKeypoint = _extractJobKeypoint(day.dailyScheduleAndImpact, 'タクシー');
+    final rainLine = _buildRainLine(day.weatherOverview);
+
+    // “差別化”のため：総括（短）を先に抽出して、詳細は畳む
+    final reportSummary = _ReportCard.extractSection(day.dailyScheduleAndImpact, '■総括');
+
     return RefreshIndicator(
       onRefresh: () async => _init(),
       child: ListView(
@@ -345,17 +394,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             totalDays: list.length,
             dateLabel: day.date,
             onAreaTap: () => _showAreaPicker(context),
-            onPrev: _dayIndex > 0
-                ? () => setState(() => _dayIndex--)
-                : null,
-            onNext: _dayIndex < list.length - 1
-                ? () => setState(() => _dayIndex++)
-                : null,
+            onPrev: _dayIndex > 0 ? () => setState(() => _dayIndex--) : null,
+            onNext: _dayIndex < list.length - 1 ? () => setState(() => _dayIndex++) : null,
           ),
           const SizedBox(height: 12),
 
           // Hero Overview (Rank + Weather)
-          _HeroOverviewCard(day: day),
+          _HeroOverviewCard(day: day, rainLine: rainLine),
           const SizedBox(height: 12),
 
           // 今日の判断材料（重要事実）
@@ -367,32 +412,35 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           ],
 
           // タクシーのピーク時間
-          final taxiPeaks = (day.peakWindows['taxi'] ?? '').trim();
           if (taxiPeaks.isNotEmpty) ...[
             _SectionTitle(icon: Icons.local_taxi, title: 'タクシーのピーク時間'),
             const SizedBox(height: 8),
             _InfoCard(
               leading: const Icon(Icons.access_time),
               title: taxiPeaks,
-              subtitle: '「混む時間＝取りに行く価値がある時間」です。雪・遅延日はピークが“伸びる”傾向があります。',
+              subtitle: '“混む時間＝取りに行く価値がある時間”。荒天日はピークが伸びやすいので、前倒し待機が効きます。',
             ),
             const SizedBox(height: 12),
           ],
 
           // タクシーの打ち手（要点） - 最も目立つ＆高密度
-          final taxiKeypoint = _extractJobKeypoint(day.dailyScheduleAndImpact, 'タクシー');
           _SectionTitle(icon: Icons.local_taxi, title: 'タクシーの打ち手（要点）'),
           const SizedBox(height: 8),
           _DecisionCard(
-            headline: taxiKeypoint.isNotEmpty ? taxiKeypoint : '本日は「安全確保」を最優先に、状況で“取りに行く時間”を切り替える設計が鍵です。',
+            headline: taxiKeypoint.isNotEmpty
+                ? taxiKeypoint
+                : _defaultTaxiHeadline(day),
             bullets: _suggestDecisionBullets(day),
           ),
           const SizedBox(height: 12),
 
-          // イベント・交通情報（見やすく段落感＝factsを活用）
+          // イベント・交通情報（見やすく段落感）
           _SectionTitle(icon: Icons.event, title: 'イベント・交通情報（詳細）'),
           const SizedBox(height: 8),
-          _EventTrafficDetailCard(facts: day.eventTrafficFacts, fallbackText: day.dailyScheduleAndImpact),
+          _EventTrafficDetailCard(
+            facts: day.eventTrafficFacts,
+            fallbackText: day.dailyScheduleAndImpact,
+          ),
           const SizedBox(height: 12),
 
           // 時間ごとの天気＆アドバイス
@@ -426,13 +474,47 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             const SizedBox(height: 12),
           ],
 
-          // 詳細レポート：重複を避け「総括＆職業別」だけ表示
-          _SectionTitle(icon: Icons.lightbulb, title: '今日のレポート（詳細）'),
+          // 今日のレポート：まず“総括だけ”を見せて、詳細は折りたたみ
+          _SectionTitle(icon: Icons.lightbulb, title: '今日のレポート（総括）'),
+          const SizedBox(height: 8),
+          if (reportSummary.trim().isNotEmpty)
+            _InfoCard(
+              leading: const Icon(Icons.summarize_outlined),
+              title: '今日の見立て（30秒で把握）',
+              subtitle: reportSummary,
+            )
+          else
+            _InfoCard(
+              leading: const Icon(Icons.summarize_outlined),
+              title: '今日の見立て',
+              subtitle: '総括が見つかりませんでした（データ生成側の見出し形式を確認してください）。',
+            ),
+          const SizedBox(height: 12),
+
+          _SectionTitle(icon: Icons.article_outlined, title: '今日のレポート（詳細）'),
           const SizedBox(height: 8),
           _ReportCard(reportText: day.dailyScheduleAndImpact),
         ],
       ),
     );
+  }
+
+  String _defaultTaxiHeadline(ForecastDay day) {
+    // 行動学：判断を動かす「型」＋リスク回避を強める
+    final r = day.rank.toUpperCase();
+    final w = day.weatherOverview.warning.trim();
+    final rainLine = _buildRainLine(day.weatherOverview);
+
+    if (w.isNotEmpty && w != '-' && w != '特になし') {
+      return '⚠️ 注意情報あり。今日は「稼ぐ」より先に「事故らない設計」。出るなら“短時間×高確度”に絞り、危険が増える時間帯は切る。';
+    }
+    if (r == 'S' || r == 'A') {
+      return '需要が出る日。勝ち筋は「待機位置」より「出る時間」。$rainLine を境に人流が変わるので、時間帯ごとに“寄せ先”を決め打ち。';
+    }
+    if (r == 'B') {
+      return '普通の日。ピークだけ拾って、外したら深追いしない。「回転＞粘り」で、駅・病院・商業の定番導線に寄せる。';
+    }
+    return '薄い日。勝ち筋は「無駄待機を削る」。短距離の確度を優先して、移動コストを最小にする。';
   }
 
   void _showAreaPicker(BuildContext context) {
@@ -469,23 +551,15 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _prettyAreaName(String areaKey) {
-    // areaKeyはhakodate等の想定。必要ならここで辞書化してもOK
-    // 今回はキーをそれっぽく整形
     return areaKey.replaceAll('_', ' ').trim();
   }
 
   String _extractJobKeypoint(String report, String jobName) {
-    // report内の「■職業別の打ち手（要点）」ブロックから
-    // 「・タクシー: ...」などを抜く
     if (report.trim().isEmpty) return '';
-
     final lines = report.split('\n').map((e) => e.trim()).toList();
-
-    // まず jobName を含む行を探す（「・タクシー:」/「タクシー:」）
     for (final line in lines) {
       if (line.isEmpty) continue;
       if (line.contains(jobName) && line.contains(':')) {
-        // なるべく「jobName:」以降だけにする
         final idx = line.indexOf(':');
         if (idx >= 0 && idx + 1 < line.length) {
           return line.substring(idx + 1).trim();
@@ -496,31 +570,29 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   List<String> _suggestDecisionBullets(ForecastDay day) {
-    // 行動学的に「判断を動かす」ための短い箇条書き（毎日変わる事実に寄せる）
-    final rainAm = (day.weatherOverview.rainAm ?? '').trim();
-    final rainPm = (day.weatherOverview.rainPm ?? '').trim();
+    final am = (day.weatherOverview.rainAm ?? '').trim();
+    final pm = (day.weatherOverview.rainPm ?? '').trim();
     final warning = day.weatherOverview.warning.trim();
 
     final bullets = <String>[];
 
     if (warning.isNotEmpty && warning != '-' && warning != '特になし') {
-      bullets.add('⚠️ $warning：無理に取りに行かず“安全優先の稼ぎ方”へ切替');
+      bullets.add('⚠️ $warning：今日は“安全が利益”。危険が増える時間帯は切ってOK。');
     }
 
-    if (rainAm.isNotEmpty || rainPm.isNotEmpty) {
-      bullets.add('☔ 午前$rainAm / 午後$rainPm：需要が動く時間にだけ寄せる（ムダ待機を削る）');
+    if (am.isNotEmpty || pm.isNotEmpty) {
+      bullets.add('☔ 午前${_roundTo10Percent(am.isEmpty ? '-' : am)} / 午後${_roundTo10Percent(pm.isEmpty ? '-' : pm)}：需要が動く時間にだけ寄せて“ムダ待機”を削る。');
     } else {
-      bullets.add('☔ 降水の不確実性が高い日は「出る/出ない」ではなく「時間帯で出る」が勝ち筋');
+      bullets.add('☔ 降水が読みにくい日は「出る/出ない」より「時間帯で出る」が勝ち筋。');
     }
 
     if (day.eventTrafficFacts.isNotEmpty) {
-      bullets.add('🚦 交通の乱れがある日は「目的地の偏り」が出る→“人が戻る導線”を押さえる');
+      bullets.add('🚦 交通が乱れる日は“目的地の偏り”が出る→人が戻る導線（駅・ホテル・病院）を押さえる。');
     } else {
-      bullets.add('🚦 交通情報が薄い日は、駅・病院・商業施設など“定番導線”の回転で拾う');
+      bullets.add('🚦 情報が薄い日は、駅・病院・商業の定番導線で回転を取る。');
     }
 
-    bullets.add('🧠 迷ったら「事故るリスク＞取り逃す損失」：判断基準を先に固定');
-
+    bullets.add('🧠 迷ったら「事故るリスク＞取り逃す損失」。基準を先に固定してブレない。');
     return bullets;
   }
 }
@@ -599,20 +671,13 @@ class _AreaAndDateHeader extends StatelessWidget {
 
 class _HeroOverviewCard extends StatelessWidget {
   final ForecastDay day;
-  const _HeroOverviewCard({required this.day});
+  final String rainLine;
+  const _HeroOverviewCard({required this.day, required this.rainLine});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
     final rankColor = _rankColor(day.rank);
-    final rainAm = day.weatherOverview.rainAm?.trim();
-    final rainPm = day.weatherOverview.rainPm?.trim();
-    final rainNight = day.weatherOverview.rainNight?.trim();
-
-    final rainLine = (rainAm != null && rainPm != null)
-        ? '午前${rainAm} / 午後${rainPm}${(rainNight != null && rainNight.isNotEmpty) ? ' / 夜${rainNight}' : ''}'
-        : day.weatherOverview.rain;
 
     return Card(
       child: Padding(
@@ -737,10 +802,7 @@ class _FactsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '“今日の判断が変わる情報”だけを短く。',
-              style: t.bodySmall,
-            ),
+            Text('“今日の判断が変わる情報”だけを短く。', style: t.bodySmall),
             const SizedBox(height: 10),
             ...facts.take(8).map((s) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -833,7 +895,6 @@ class _DecisionCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-
             Text('今日の動き方（迷いを減らす）', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 8),
             ...bullets.map((b) => Padding(
@@ -867,7 +928,6 @@ class _EventTrafficDetailCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
 
-    // factsが無いときだけ fallbackTextから薄く拾う（最悪でも空にしない）
     final items = facts.isNotEmpty ? facts : _extractEventTrafficFromReport(fallbackText);
 
     return Card(
@@ -894,7 +954,7 @@ class _EventTrafficDetailCard extends StatelessWidget {
                         children: [
                           const Icon(Icons.info_outline, size: 18),
                           const SizedBox(width: 8),
-                          Expanded(child: Text(s, style: t.bodyMedium)),
+                          Expanded(child: Text(_prettyParagraph(s), style: t.bodyMedium)),
                         ],
                       ),
                     ),
@@ -905,8 +965,14 @@ class _EventTrafficDetailCard extends StatelessWidget {
     );
   }
 
+  static String _prettyParagraph(String s) {
+    // 句点で軽く段落っぽく（やりすぎない）
+    final x = s.trim();
+    if (x.length < 28) return x;
+    return x.replaceAll('。', '。\n');
+  }
+
   static List<String> _extractEventTrafficFromReport(String report) {
-    // report内の「■Event & Traffic」〜「■総括」の間をざっくり抜く
     final text = report;
     final start = text.indexOf('■Event & Traffic');
     if (start < 0) return const [];
@@ -936,6 +1002,9 @@ class _TimeSlotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
 
+    final rain = _roundTo10Percent(slot.rain);
+    final humidity = _roundTo10Percent(slot.humidity); // humidityも%なので同処理
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -945,21 +1014,19 @@ class _TimeSlotCard extends StatelessWidget {
             // header row
             Row(
               children: [
-                Expanded(
-                  child: Text(label, style: t.titleMedium),
-                ),
+                Expanded(child: Text(label, style: t.titleMedium)),
                 Text(slot.weather, style: const TextStyle(fontSize: 20)),
               ],
             ),
             const SizedBox(height: 8),
 
-            // temp line
+            // temp line（意味が伝わる表記）
             Wrap(
               spacing: 10,
               runSpacing: 6,
               children: [
-                _pill('🌡️ 気温 ${slot.temp}'),
-                _pill('↕️ 高${slot.tempHigh} / 低${slot.tempLow}'),
+                _pill('🌡️ 予想気温 ${slot.temp}'),
+                _pill('↕️ 最高 ${slot.tempHigh} / 最低 ${slot.tempLow}'),
               ],
             ),
             const SizedBox(height: 8),
@@ -967,9 +1034,9 @@ class _TimeSlotCard extends StatelessWidget {
             // humidity/rain with labels
             Row(
               children: [
-                Expanded(child: _kv('予想降水確率', slot.rain)),
+                Expanded(child: _kv('予想降水確率', rain)),
                 const SizedBox(width: 10),
-                Expanded(child: _kv('予想湿度', slot.humidity)),
+                Expanded(child: _kv('予想湿度', humidity)),
               ],
             ),
 
@@ -1033,9 +1100,8 @@ class _ReportCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
 
-    // 重複を避けて「総括」「職業別」だけ抽出
-    final summary = _extractSection(reportText, '■総括');
-    final actions = _extractSection(reportText, '■職業別の打ち手（要点）');
+    final summary = extractSection(reportText, '■総括');
+    final actions = extractSection(reportText, '■職業別の打ち手（要点）');
 
     return Card(
       child: ExpansionTile(
@@ -1056,18 +1122,16 @@ class _ReportCard extends StatelessWidget {
             const SizedBox(height: 6),
             _prettyBullets(actions),
           ],
-          if (summary.isEmpty && actions.isEmpty)
-            Text('レポートが空です。', style: t.bodyMedium),
+          if (summary.isEmpty && actions.isEmpty) Text('レポートが空です。', style: t.bodyMedium),
         ],
       ),
     );
   }
 
-  static String _extractSection(String text, String header) {
+  static String extractSection(String text, String header) {
     if (text.trim().isEmpty) return '';
     final start = text.indexOf(header);
     if (start < 0) return '';
-    // 次の見出し（■）まで
     final rest = text.substring(start + header.length);
     final next = rest.indexOf('\n■');
     final block = (next >= 0) ? rest.substring(0, next) : rest;
@@ -1086,10 +1150,7 @@ class _ReportCard extends StatelessWidget {
         .where((e) => e.isNotEmpty)
         .toList();
 
-    // 「・」始まりを優先、無ければそのまま行で
-    final items = lines.where((l) => l.startsWith('・')).isNotEmpty
-        ? lines.where((l) => l.startsWith('・')).toList()
-        : lines;
+    final items = lines.where((l) => l.startsWith('・')).isNotEmpty ? lines.where((l) => l.startsWith('・')).toList() : lines;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
