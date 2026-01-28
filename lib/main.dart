@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show rootBundle;
 /// - assets/eagle_eye_data.json を読み込み
 /// - main.py(v5.1)の新フィールドに対応
 /// - 視認性（文字色/コントラスト）を改善
+/// - Webビルドで落ちる「List内final宣言」エラーを修正
 /// ===============================
 
 void main() {
@@ -29,14 +30,14 @@ class EagleEyeApp extends StatelessWidget {
   ThemeData _buildTheme() {
     // ===== Palette（コントラスト重視）=====
     const bg = Color(0xFF0B1220);
-    const card = Color(0xFF111F34);      // ほんの少し明るく
-    const card2 = Color(0xFF142844);     // 内側ブロック用
+    const card = Color(0xFF111F34); // ほんの少し明るく
+    const card2 = Color(0xFF142844); // 内側ブロック用
     const accent = Color(0xFFFFA135);
 
     // 文字色（強制的に明るく）
-    const fg = Color(0xFFEAF0FF);        // ほぼ白
-    const fgSoft = Color(0xFFB9C7E6);    // 説明文
-    const fgMuted = Color(0xFF92A3C7);   // 補助
+    const fg = Color(0xFFEAF0FF); // ほぼ白
+    const fgSoft = Color(0xFFB9C7E6); // 説明文
+    const fgMuted = Color(0xFF92A3C7); // 補助
 
     final scheme = ColorScheme.fromSeed(
       seedColor: accent,
@@ -100,7 +101,7 @@ class EagleEyeApp extends StatelessWidget {
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       ),
-      // ここも事故が出やすいので固定
+      // ExpansionTileは黒化しやすいので固定
       expansionTileTheme: ExpansionTileThemeData(
         textColor: fg,
         iconColor: fg,
@@ -111,8 +112,7 @@ class EagleEyeApp extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
-      // 内側ブロックの背景色を少し持ち上げる
-      extensions: <ThemeExtension<dynamic>>[
+      extensions: const <ThemeExtension<dynamic>>[
         _EagleEyeColors(card2: card2, fg: fg, fgSoft: fgSoft, fgMuted: fgMuted),
       ],
     );
@@ -312,7 +312,6 @@ class SlotWeather {
 /// ===============================
 
 class EagleEyeRepo {
-  /// assets/eagle_eye_data.json を読む
   Future<Map<String, List<ForecastDay>>> load() async {
     final raw = await rootBundle.loadString('assets/eagle_eye_data.json');
     final decoded = json.decode(raw);
@@ -416,7 +415,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     final list = _data[areaKey]!;
     if (list.isEmpty) return const _ErrorView(message: 'エリアの予測が空です');
 
-    final day = list[_dayIndex.clamp(0, list.length - 1)];
+    final safeIndex = _dayIndex.clamp(0, list.length - 1);
+    final day = list[safeIndex];
+
+    // ✅ 重要：ListView children の外で変数を作る（List内final宣言禁止）
+    final taxiPeaks = (day.peakWindows['taxi'] ?? '').trim();
+    final taxiKeypoint = _extractJobKeypoint(day.dailyScheduleAndImpact, 'タクシー');
 
     return RefreshIndicator(
       onRefresh: () async => _init(),
@@ -425,12 +429,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         children: [
           _AreaAndDateHeader(
             areaKey: areaKey,
-            dayIndex: _dayIndex,
+            dayIndex: safeIndex,
             totalDays: list.length,
             dateLabel: day.date,
             onAreaTap: () => _showAreaPicker(context),
-            onPrev: _dayIndex > 0 ? () => setState(() => _dayIndex--) : null,
-            onNext: _dayIndex < list.length - 1 ? () => setState(() => _dayIndex++) : null,
+            onPrev: safeIndex > 0 ? () => setState(() => _dayIndex--) : null,
+            onNext: safeIndex < list.length - 1 ? () => setState(() => _dayIndex++) : null,
           ),
           const SizedBox(height: 12),
 
@@ -444,7 +448,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             const SizedBox(height: 12),
           ],
 
-          final taxiPeaks = (day.peakWindows['taxi'] ?? '').trim();
           if (taxiPeaks.isNotEmpty) ...[
             _SectionTitle(icon: Icons.local_taxi, title: 'タクシーのピーク時間'),
             const SizedBox(height: 8),
@@ -456,7 +459,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             const SizedBox(height: 12),
           ],
 
-          final taxiKeypoint = _extractJobKeypoint(day.dailyScheduleAndImpact, 'タクシー');
           _SectionTitle(icon: Icons.local_taxi, title: 'タクシーの打ち手（要点）'),
           const SizedBox(height: 8),
           _DecisionCard(
@@ -734,10 +736,7 @@ class _HeroOverviewCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   if (day.weatherOverview.warning.trim().isNotEmpty && day.weatherOverview.warning.trim() != '-')
-                    Text(
-                      '⚠️ ${day.weatherOverview.warning}',
-                      style: t.bodySmall,
-                    ),
+                    Text('⚠️ ${day.weatherOverview.warning}', style: t.bodySmall),
                 ],
               ),
             ),
@@ -1154,7 +1153,8 @@ class _ReportCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('• ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white.withOpacity(0.92))),
+              Text('• ',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white.withOpacity(0.92))),
               Expanded(child: Text(line, style: TextStyle(color: Colors.white.withOpacity(0.96), height: 1.55))),
             ],
           ),
