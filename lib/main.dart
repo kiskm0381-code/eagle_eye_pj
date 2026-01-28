@@ -6,7 +6,6 @@ import 'package:flutter/services.dart' show rootBundle;
 /// Eagle Eye - main.dart
 /// - assets/eagle_eye_data.json を読み込み
 /// - 職業選択で「ピーク」「打ち手」「時間帯アドバイス」を切替
-/// - Webビルドで落ちる「List children内でfinal宣言」禁止に対応
 /// ===============================
 
 void main() {
@@ -78,7 +77,7 @@ class EagleEyeApp extends StatelessWidget {
 }
 
 /// ===============================
-/// Job (職業定義)
+/// Job (職業定義) - 5職業固定
 /// ===============================
 
 enum JobType {
@@ -87,7 +86,6 @@ enum JobType {
   hotel,
   restaurant,
   retail,
-  care,
 }
 
 class JobInfo {
@@ -105,7 +103,6 @@ class JobInfo {
 }
 
 const List<JobInfo> kJobs = [
-  JobInfo(type: JobType.care, key: 'care', label: 'care', icon: Icons.health_and_safety),
   JobInfo(type: JobType.delivery, key: 'delivery', label: 'デリバリー', icon: Icons.delivery_dining),
   JobInfo(type: JobType.hotel, key: 'hotel', label: 'ホテル', icon: Icons.hotel),
   JobInfo(type: JobType.restaurant, key: 'restaurant', label: '飲食店', icon: Icons.restaurant),
@@ -280,7 +277,6 @@ class EagleEyeRepo {
   Future<Map<String, List<ForecastDay>>> load() async {
     final raw = await rootBundle.loadString('assets/eagle_eye_data.json');
 
-    // 空ファイル/途中で切れているJSONの事故を早期に分かりやすく
     if (raw.trim().isEmpty) {
       throw const FormatException('assets/eagle_eye_data.json が空です');
     }
@@ -389,13 +385,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
     final day = list[_dayIndex.clamp(0, list.length - 1)];
 
-    // 職業별：ピーク/要点/時間帯アドバイスのキーを決める
     final jobKey = _selectedJob.key;
 
-    // ピーク（職業別）
     final peaks = (day.peakWindows[jobKey] ?? '').trim();
-
-    // 職業別要点（job_actions優先、なければレポートから抽出）
     final jobAction = _jobActionFor(day, jobKey);
 
     return RefreshIndicator(
@@ -414,18 +406,15 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 職業選択（最上部）
           _JobPickerCard(
             selected: _selectedJob,
             onSelect: (j) => setState(() => _selectedJob = j),
           ),
           const SizedBox(height: 12),
 
-          // Hero Overview (Rank + Weather)
           _HeroOverviewCard(day: day),
           const SizedBox(height: 12),
 
-          // 今日の判断材料（重要事実）
           if (day.eventTrafficFacts.isNotEmpty) ...[
             const _SectionTitle(icon: Icons.flash_on, title: '今日の判断材料'),
             const SizedBox(height: 8),
@@ -433,7 +422,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             const SizedBox(height: 12),
           ],
 
-          // ピーク時間（職業別）
           if (peaks.isNotEmpty) ...[
             _SectionTitle(icon: _selectedJob.icon, title: '${_selectedJob.label}のピーク時間'),
             const SizedBox(height: 8),
@@ -445,7 +433,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             const SizedBox(height: 12),
           ],
 
-          // 打ち手（要点）：職業別
           _SectionTitle(icon: _selectedJob.icon, title: '${_selectedJob.label}の打ち手（要点）'),
           const SizedBox(height: 8),
           _DecisionCard(
@@ -454,13 +441,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           ),
           const SizedBox(height: 12),
 
-          // イベント・交通情報（詳細）
           const _SectionTitle(icon: Icons.event, title: 'イベント・交通情報（詳細）'),
           const SizedBox(height: 8),
           _EventTrafficDetailCard(facts: day.eventTrafficFacts, fallbackText: day.dailyScheduleAndImpact),
           const SizedBox(height: 12),
 
-          // 時間ごとの天気＆アドバイス（職業別）
           const _SectionTitle(icon: Icons.schedule, title: '時間ごとの天気＆アドバイス'),
           const SizedBox(height: 8),
           if (day.timeline != null) ...[
@@ -547,24 +532,19 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         return '「来店/テイクアウトが動く時間」の目安です。悪天候日は“店内減・持ち帰り増”に寄りやすいです。';
       case 'retail':
         return '「購買行動が動く時間」の目安です。荒天日は“短時間集中”になりやすいのでピークが尖ります。';
-      case 'care':
-        return '「移動/訪問が重なる時間」の目安です。路面状況が悪い日は余裕を見てルート調整します。';
       default:
         return '混みやすい時間帯の目安です。';
     }
   }
 
   String _jobActionFor(ForecastDay day, String jobKey) {
-    // job_actions があれば優先
     final direct = (day.jobActions[jobKey] ?? '').trim();
     if (direct.isNotEmpty) return direct;
 
-    // なければレポートの「■職業別の打ち手（要点）」から抽出
     final report = day.dailyScheduleAndImpact;
     if (report.trim().isEmpty) return '';
     final lines = report.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
-    // 例：「・タクシー: ...」「タクシー: ...」など
     final jobLabel = _jobLabelForExtraction(jobKey);
     for (final line in lines) {
       if (line.contains(jobLabel) && line.contains(':')) {
@@ -589,8 +569,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         return '飲食';
       case 'retail':
         return '小売';
-      case 'care':
-        return '介護';
       default:
         return jobKey;
     }
@@ -618,15 +596,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     if (day.eventTrafficFacts.isNotEmpty) {
       bullets.add('🚦 交通の乱れがある日は導線が偏る→“戻り導線”や代替導線を先に決める');
     } else {
-      bullets.add('🚦 情報が薄い日は定番導線（駅/病院/商業/幹線）で回転を作る');
+      bullets.add('🚦 情報が薄い日は定番導線（駅/商業/幹線）で回転を作る');
     }
 
-    // 職業ごとのワンポイント
     bullets.add(_jobSpecificBullet(jobKey));
-
     bullets.add('🧠 迷ったら「事故るリスク＞取り逃す損失」：判断基準を先に固定');
 
-    // 空が混ざらないように
     return bullets.where((e) => e.trim().isNotEmpty).toList();
   }
 
@@ -637,13 +612,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       case 'delivery':
         return '🎯 デリバリーは「受ける範囲」と「締める判断」を先に決めて遅配を防ぐ';
       case 'hotel':
-        return '🎯 ホテルは「遅延/欠航対応」を最優先。問い合わせ導線と説明文テンプレを用意';
+        return '🎯 ホテルは「遅延/欠航対応」を最優先。問い合わせ導線と説明テンプレを用意';
       case 'restaurant':
         return '🎯 飲食は「店内⇄持ち帰り」の比率を可変に。仕込み/人員を時間帯で寄せる';
       case 'retail':
         return '🎯 小売は「午前〜正午」で回収しやすい。レジ/品出し配分をピークに寄せる';
-      case 'care':
-        return '🎯 介護は「訪問順の最適化」と「時間余裕」の確保。送迎は安全第一で代替連絡を徹底';
       default:
         return '';
     }
@@ -795,7 +768,7 @@ class _HeroOverviewCard extends StatelessWidget {
     final rainNight = day.weatherOverview.rainNight?.trim();
 
     final rainLine = (rainAm != null && rainPm != null)
-        ? '午前${rainAm} / 午後${rainPm}${(rainNight != null && rainNight.isNotEmpty) ? ' / 夜${rainNight}' : ''}'
+        ? '午前$rainAm / 午後$rainPm${(rainNight != null && rainNight.isNotEmpty) ? ' / 夜$rainNight' : ''}'
         : day.weatherOverview.rain;
 
     return Card(
@@ -804,7 +777,6 @@ class _HeroOverviewCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Rank badge + label ("混雑予測"をランク上へ)
             Column(
               children: [
                 Text(
@@ -831,7 +803,6 @@ class _HeroOverviewCard extends StatelessWidget {
             ),
             const SizedBox(width: 14),
 
-            // Weather overview (「意思決定ス…」は削除)
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1013,7 +984,6 @@ class _DecisionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // headline
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -1133,7 +1103,6 @@ class _TimeSlotCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // header row
             Row(
               children: [
                 Expanded(
