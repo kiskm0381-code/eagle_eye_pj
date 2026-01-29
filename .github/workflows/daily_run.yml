@@ -1,43 +1,51 @@
+# .github/workflows/daily_run.yml
 name: Eagle Eye Daily Forecast
 
 on:
   schedule:
-    # 日本時間 朝5:05 (UTC 20:05) に定期実
+    # 日本時間 朝5:05 (UTC 20:05) に定期実行
     - cron: '5 20 * * *'
-  workflow_dispatch: # 手動実行ボタンも有効化
+  workflow_dispatch:
 
-# ★ここを追加：書き込み権限を付与
 permissions:
   contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        # Google AIライブラリ
-        pip install -U google-generativeai
-        pip install requests pytz
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U google-generativeai
+          pip install requests pytz
 
-    - name: Run forecast script
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      run: python main.py
+      - name: Run forecast script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
 
-    - name: Commit and push if changes
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        git add eagle_eye_data.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update forecast data" && git push)
+      - name: Commit and push if changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+          # ★Flutterが読むのは assets/eagle_eye_data.json
+          git add assets/eagle_eye_data.json
+
+          # 変更が無ければ終了（エラー扱いにしない）
+          git diff --cached --quiet && echo "No changes" && exit 0
+
+          git commit -m "Update forecast data"
+          git push
